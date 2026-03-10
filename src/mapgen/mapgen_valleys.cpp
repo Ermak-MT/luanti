@@ -1,20 +1,34 @@
 /*
-Luanti
-SPDX-License-Identifier: LGPL-2.1-or-later
+Minetest
 Copyright (C) 2016-2019 Duane Robertson <duane@duanerobertson.com>
 Copyright (C) 2016-2019 paramat
 
 Based on Valleys Mapgen by Gael de Sailly
-(https://forum.luanti.org/viewtopic.php?f=9&t=11430)
+(https://forum.minetest.net/viewtopic.php?f=9&t=11430)
 and mapgen_v7, mapgen_flat by kwolekr and paramat.
 
 Licensing changed by permission of Gael de Sailly.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
 
 #include "mapgen.h"
 #include "voxel.h"
 #include "noise.h"
+#include "mapblock.h"
 #include "mapnode.h"
 #include "map.h"
 #include "nodedef.h"
@@ -31,7 +45,7 @@ Licensing changed by permission of Gael de Sailly.
 #include <cmath>
 
 
-const FlagDesc flagdesc_mapgen_valleys[] = {
+FlagDesc flagdesc_mapgen_valleys[] = {
 	{"altitude_chill",   MGVALLEYS_ALT_CHILL},
 	{"humid_rivers",     MGVALLEYS_HUMID_RIVERS},
 	{"vary_river_depth", MGVALLEYS_VARY_RIVER_DEPTH},
@@ -40,11 +54,10 @@ const FlagDesc flagdesc_mapgen_valleys[] = {
 };
 
 
-MapgenValleys::MapgenValleys(MapgenValleysParams *params, EmergeParams *emerge)
+MapgenValleys::MapgenValleys(MapgenValleysParams *params, EmergeManager *emerge)
 	: MapgenBasic(MAPGEN_VALLEYS, params, emerge)
 {
-	FATAL_ERROR_IF(biomegen->getType() != BIOMEGEN_ORIGINAL,
-		"MapgenValleys has a hard dependency on BiomeGenOriginal");
+	// NOTE: MapgenValleys has a hard dependency on BiomeGenOriginal
 	m_bgen = (BiomeGenOriginal *)biomegen;
 
 	spflags            = params->spflags;
@@ -197,6 +210,12 @@ void MapgenValleys::makeChunk(BlockMakeData *data)
 	// Pre-conditions
 	assert(data->vmanip);
 	assert(data->nodedef);
+	assert(data->blockpos_requested.X >= data->blockpos_min.X &&
+		data->blockpos_requested.Y >= data->blockpos_min.Y &&
+		data->blockpos_requested.Z >= data->blockpos_min.Z);
+	assert(data->blockpos_requested.X <= data->blockpos_max.X &&
+		data->blockpos_requested.Y <= data->blockpos_max.Y &&
+		data->blockpos_requested.Z <= data->blockpos_max.Z);
 
 	//TimeTaker t("makeChunk");
 
@@ -249,8 +268,7 @@ void MapgenValleys::makeChunk(BlockMakeData *data)
 	}
 
 	// Generate the registered ores
-	if (flags & MG_ORES)
-		m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
+	m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
 
 	// Dungeon creation
 	if (flags & MG_DUNGEONS)
@@ -279,15 +297,15 @@ void MapgenValleys::makeChunk(BlockMakeData *data)
 int MapgenValleys::getSpawnLevelAtPoint(v2s16 p)
 {
 	// Check if in a river channel
-	float n_rivers = NoiseFractal2D(&noise_rivers->np, p.X, p.Y, seed);
+	float n_rivers = NoisePerlin2D(&noise_rivers->np, p.X, p.Y, seed);
 	if (std::fabs(n_rivers) <= river_size_factor)
 		// Unsuitable spawn point
 		return MAX_MAP_GENERATION_LIMIT;
 
-	float n_slope          = NoiseFractal2D(&noise_inter_valley_slope->np, p.X, p.Y, seed);
-	float n_terrain_height = NoiseFractal2D(&noise_terrain_height->np, p.X, p.Y, seed);
-	float n_valley         = NoiseFractal2D(&noise_valley_depth->np, p.X, p.Y, seed);
-	float n_valley_profile = NoiseFractal2D(&noise_valley_profile->np, p.X, p.Y, seed);
+	float n_slope          = NoisePerlin2D(&noise_inter_valley_slope->np, p.X, p.Y, seed);
+	float n_terrain_height = NoisePerlin2D(&noise_terrain_height->np, p.X, p.Y, seed);
+	float n_valley         = NoisePerlin2D(&noise_valley_depth->np, p.X, p.Y, seed);
+	float n_valley_profile = NoisePerlin2D(&noise_valley_profile->np, p.X, p.Y, seed);
 
 	float valley_d = n_valley * n_valley;
 	float base = n_terrain_height + valley_d;
@@ -308,7 +326,7 @@ int MapgenValleys::getSpawnLevelAtPoint(v2s16 p)
 	// Starting spawn search at max_spawn_y + 128 ensures 128 nodes of open
 	// space above spawn position. Avoids spawning in possibly sealed voids.
 	for (s16 y = max_spawn_y + 128; y >= water_level; y--) {
-		float n_fill = NoiseFractal3D(&noise_inter_valley_fill->np, p.X, y, p.Y, seed);
+		float n_fill = NoisePerlin3D(&noise_inter_valley_fill->np, p.X, y, p.Y, seed);
 		float surface_delta = (float)y - surface_y;
 		float density = slope * n_fill - surface_delta;
 
@@ -335,15 +353,15 @@ int MapgenValleys::generateTerrain()
 	MapNode n_stone(c_stone);
 	MapNode n_water(c_water_source);
 
-	noise_inter_valley_slope->noiseMap2D(node_min.X, node_min.Z);
-	noise_rivers->noiseMap2D(node_min.X, node_min.Z);
-	noise_terrain_height->noiseMap2D(node_min.X, node_min.Z);
-	noise_valley_depth->noiseMap2D(node_min.X, node_min.Z);
-	noise_valley_profile->noiseMap2D(node_min.X, node_min.Z);
+	noise_inter_valley_slope->perlinMap2D(node_min.X, node_min.Z);
+	noise_rivers->perlinMap2D(node_min.X, node_min.Z);
+	noise_terrain_height->perlinMap2D(node_min.X, node_min.Z);
+	noise_valley_depth->perlinMap2D(node_min.X, node_min.Z);
+	noise_valley_profile->perlinMap2D(node_min.X, node_min.Z);
 
-	noise_inter_valley_fill->noiseMap3D(node_min.X, node_min.Y - 1, node_min.Z);
+	noise_inter_valley_fill->perlinMap3D(node_min.X, node_min.Y - 1, node_min.Z);
 
-	const v3s32 &em = vm->m_area.getExtent();
+	const v3s16 &em = vm->m_area.getExtent();
 	s16 surface_max_y = -MAX_MAP_GENERATION_LIMIT;
 	u32 index_2d = 0;
 

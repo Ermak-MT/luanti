@@ -1,16 +1,39 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013, 2017 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013, 2017 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "mesh_generator_thread.h"
 #include "settings.h"
 #include "profiler.h"
 #include "client.h"
 #include "mapblock.h"
-#include "mapblock_mesh.h"
 #include "map.h"
-#include "util/directiontables.h"
-#include "porting.h"
+
+/*
+	CachedMapBlockData
+*/
+
+CachedMapBlockData::~CachedMapBlockData()
+{
+	assert(refcount_from_queue == 0);
+
+	delete[] data;
+}
 
 /*
 	QueuedMeshUpdate
@@ -21,67 +44,6 @@ QueuedMeshUpdate::~QueuedMeshUpdate()
 	delete data;
 }
 
-void QueuedMeshUpdate::retrieveBlocks(Map *map, u16 cell_size)
-{
-	const size_t total = (cell_size+2)*(cell_size+2)*(cell_size+2);
-	if (map_blocks.empty())
-		map_blocks.resize(total);
-	else
-		assert(map_blocks.size() == total); // must not change
-	size_t i = 0;
-	v3s16 pos;
-	// order is not important, but it must be consistent
-	// note the extra margin!
-	for (pos.X = p.X - 1; pos.X <= p.X + cell_size; pos.X++)
-	for (pos.Z = p.Z - 1; pos.Z <= p.Z + cell_size; pos.Z++)
-	for (pos.Y = p.Y - 1; pos.Y <= p.Y + cell_size; pos.Y++) {
-		if (!map_blocks[i]) {
-			MapBlock *block = map->getBlockNoCreateNoEx(pos);
-			if (block) {
-				block->refGrab();
-				map_blocks[i] = block;
-			}
-		}
-		i++;
-	}
-}
-
-bool QueuedMeshUpdate::checkSkip(u16 cell_size)
-{
-	bool all_air = true;
-	const v3s16 p_max = p + v3s16(cell_size);
-	assert(!map_blocks.empty());
-	for (auto *block : map_blocks) {
-		// ignore extra margin
-		if (block && block->getPos() >= p && block->getPos() < p_max) {
-			all_air &= block->isAir();
-		}
-	}
-	return all_air;
-}
-
-void QueuedMeshUpdate::dropBlocks()
-{
-	for (auto *block : map_blocks) {
-		if (block)
-			block->refDrop();
-	}
-	map_blocks.clear();
-}
-
-namespace {
-	struct DroppingDeleter {
-		void operator() (QueuedMeshUpdate *q) {
-			if (q)
-				q->dropBlocks();
-			delete q;
-		}
-	};
-
-	// Simple helper to avoid messing up the refcounting
-	using UnqueuedMeshUpdate = std::unique_ptr<QueuedMeshUpdate, DroppingDeleter>;
-}
-
 /*
 	MeshUpdateQueue
 */
@@ -89,281 +51,255 @@ namespace {
 MeshUpdateQueue::MeshUpdateQueue(Client *client):
 	m_client(client)
 {
+	m_cache_enable_shaders = g_settings->getBool("enable_shaders");
+	m_cache_use_tangent_vertices = m_cache_enable_shaders && (
+		g_settings->getBool("enable_bumpmapping") ||
+		g_settings->getBool("enable_parallax_occlusion"));
 	m_cache_smooth_lighting = g_settings->getBool("smooth_lighting");
-	m_cache_enable_water_reflections = g_settings->getBool("enable_water_reflections");
+	m_meshgen_block_cache_size = g_settings->getS32("meshgen_block_cache_size");
 }
 
 MeshUpdateQueue::~MeshUpdateQueue()
 {
 	MutexAutoLock lock(m_mutex);
 
+	for (auto &i : m_cache) {
+		delete i.second;
+	}
+
 	for (QueuedMeshUpdate *q : m_queue) {
-		q->dropBlocks();
 		delete q;
 	}
 }
 
-bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
-	bool urgent, bool from_neighbor)
+void MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server, bool urgent)
 {
-	// If block that causes update does not exist, skip.
-	if (!map->getBlockNoCreateNoEx(p))
-		return false;
-
-	const MeshGrid mesh_grid = m_client->getMeshGrid();
-
-	// Mesh is placed at the corner block of a chunk
-	// (where all coordinate are divisible by the chunk size)
-	const v3s16 mesh_position = mesh_grid.getMeshPos(p);
-
 	MutexAutoLock lock(m_mutex);
+
+	cleanupCache();
+
+	/*
+		Cache the block data (force-update the center block, don't update the
+		neighbors but get them if they aren't already cached)
+	*/
+	std::vector<CachedMapBlockData*> cached_blocks;
+	size_t cache_hit_counter = 0;
+	cached_blocks.reserve(3*3*3);
+	v3s16 dp;
+	for (dp.X = -1; dp.X <= 1; dp.X++)
+	for (dp.Y = -1; dp.Y <= 1; dp.Y++)
+	for (dp.Z = -1; dp.Z <= 1; dp.Z++) {
+		v3s16 p1 = p + dp;
+		CachedMapBlockData *cached_block;
+		if (dp == v3s16(0, 0, 0))
+			cached_block = cacheBlock(map, p1, FORCE_UPDATE);
+		else
+			cached_block = cacheBlock(map, p1, SKIP_UPDATE_IF_ALREADY_CACHED,
+					&cache_hit_counter);
+		cached_blocks.push_back(cached_block);
+	}
+	g_profiler->avg("MeshUpdateQueue: MapBlocks from cache [%]",
+			100.0f * cache_hit_counter / cached_blocks.size());
 
 	/*
 		Mark the block as urgent if requested
 	*/
 	if (urgent)
-		m_urgents.insert(mesh_position);
+		m_urgents.insert(p);
 
 	/*
 		Find if block is already in queue.
 		If it is, update the data and quit.
 	*/
 	for (QueuedMeshUpdate *q : m_queue) {
-		if (q->p == mesh_position) {
-			if (ack_block_to_server)
-				q->ack_list.push_back(p);
+		if (q->p == p) {
+			// NOTE: We are not adding a new position to the queue, thus
+			//       refcount_from_queue stays the same.
+			if(ack_block_to_server)
+				q->ack_block_to_server = true;
 			q->crack_level = m_client->getCrackLevel();
 			q->crack_pos = m_client->getCrackPos();
-			q->urgent |= urgent;
-			q->retrieveBlocks(map, mesh_grid.cell_size);
-			return true;
+			return;
 		}
 	}
 
 	/*
-		Grab the relevant blocks first
+		Add the block
 	*/
-	UnqueuedMeshUpdate q{new QueuedMeshUpdate()};
-	q->p = mesh_position;
-	if (ack_block_to_server)
-		q->ack_list.push_back(p);
+	QueuedMeshUpdate *q = new QueuedMeshUpdate;
+	q->p = p;
+	q->ack_block_to_server = ack_block_to_server;
 	q->crack_level = m_client->getCrackLevel();
 	q->crack_pos = m_client->getCrackPos();
-	q->urgent = urgent;
-	q->retrieveBlocks(map, mesh_grid.cell_size);
+	m_queue.push_back(q);
 
-	/*
-		Air blocks won't suddenly become visible due to a neighbor update, so
-		skip those.
-		Note: this can be extended with more precise checks in the future
-	*/
-	if (from_neighbor && q->checkSkip(mesh_grid.cell_size)) {
-		assert(!ack_block_to_server);
-		m_urgents.erase(mesh_position);
-		g_profiler->add("MeshUpdateQueue: updates skipped", 1);
-		return true;
+	// This queue entry is a new reference to the cached blocks
+	for (CachedMapBlockData *cached_block : cached_blocks) {
+		cached_block->refcount_from_queue++;
 	}
-
-	// Put into queue, pointer moved from `q`.
-	m_queue.push_back(q.release());
-
-	return true;
 }
 
 // Returned pointer must be deleted
 // Returns NULL if queue is empty
 QueuedMeshUpdate *MeshUpdateQueue::pop()
 {
-	QueuedMeshUpdate *result = NULL;
-	{
-		MutexAutoLock lock(m_mutex);
+	MutexAutoLock lock(m_mutex);
 
-		bool must_be_urgent = !m_urgents.empty();
-		for (auto i = m_queue.begin(); i != m_queue.end(); ++i) {
-			QueuedMeshUpdate *q = *i;
-			if (must_be_urgent && m_urgents.count(q->p) == 0)
-				continue;
-			// Make sure no two threads are processing the same mapblock, as that causes racing conditions
-			if (m_inflight_blocks.find(q->p) != m_inflight_blocks.end())
-				continue;
-			m_queue.erase(i);
-			m_urgents.erase(q->p);
-			m_inflight_blocks.insert(q->p);
-			result = q;
-			break;
+	bool must_be_urgent = !m_urgents.empty();
+	for (std::vector<QueuedMeshUpdate*>::iterator i = m_queue.begin();
+			i != m_queue.end(); ++i) {
+		QueuedMeshUpdate *q = *i;
+		if(must_be_urgent && m_urgents.count(q->p) == 0)
+			continue;
+		m_queue.erase(i);
+		m_urgents.erase(q->p);
+		fillDataFromMapBlockCache(q);
+		return q;
+	}
+	return NULL;
+}
+
+CachedMapBlockData* MeshUpdateQueue::cacheBlock(Map *map, v3s16 p, UpdateMode mode,
+			size_t *cache_hit_counter)
+{
+	CachedMapBlockData *cached_block = nullptr;
+	std::map<v3s16, CachedMapBlockData*>::iterator it =
+			m_cache.find(p);
+
+	if (it != m_cache.end()) {
+		cached_block = it->second;
+
+		if (mode == SKIP_UPDATE_IF_ALREADY_CACHED) {
+			if (cache_hit_counter)
+				(*cache_hit_counter)++;
+			return cached_block;
 		}
 	}
 
-	if (result)
-		fillDataFromMapBlocks(result);
+	if (!cached_block) {
+		// Not yet in cache
+		cached_block = new CachedMapBlockData();
+		m_cache[p] = cached_block;
+	}
 
-	return result;
+	MapBlock *b = map->getBlockNoCreateNoEx(p);
+	if (b) {
+		if (!cached_block->data)
+			cached_block->data =
+					new MapNode[MAP_BLOCKSIZE * MAP_BLOCKSIZE * MAP_BLOCKSIZE];
+		memcpy(cached_block->data, b->getData(),
+				MAP_BLOCKSIZE * MAP_BLOCKSIZE * MAP_BLOCKSIZE * sizeof(MapNode));
+	} else {
+		delete[] cached_block->data;
+		cached_block->data = nullptr;
+	}
+	return cached_block;
 }
 
-void MeshUpdateQueue::done(v3s16 pos)
+CachedMapBlockData* MeshUpdateQueue::getCachedBlock(const v3s16 &p)
 {
-	MutexAutoLock lock(m_mutex);
-	m_inflight_blocks.erase(pos);
+	std::map<v3s16, CachedMapBlockData*>::iterator it = m_cache.find(p);
+	if (it != m_cache.end()) {
+		return it->second;
+	}
+	return NULL;
 }
 
-
-void MeshUpdateQueue::fillDataFromMapBlocks(QueuedMeshUpdate *q)
+void MeshUpdateQueue::fillDataFromMapBlockCache(QueuedMeshUpdate *q)
 {
-	auto mesh_grid = m_client->getMeshGrid();
-	MeshMakeData *data = new MeshMakeData(m_client->ndef(),
-			MAP_BLOCKSIZE * mesh_grid.cell_size, mesh_grid);
+	MeshMakeData *data = new MeshMakeData(m_client, m_cache_enable_shaders,
+			m_cache_use_tangent_vertices);
 	q->data = data;
 
 	data->fillBlockDataBegin(q->p);
 
-	for (auto *block : q->map_blocks) {
-		if (block)
-			block->copyTo(data->m_vmanip);
+	std::time_t t_now = std::time(0);
+
+	// Collect data for 3*3*3 blocks from cache
+	v3s16 dp;
+	for (dp.X = -1; dp.X <= 1; dp.X++)
+	for (dp.Y = -1; dp.Y <= 1; dp.Y++)
+	for (dp.Z = -1; dp.Z <= 1; dp.Z++) {
+		v3s16 p = q->p + dp;
+		CachedMapBlockData *cached_block = getCachedBlock(p);
+		if (cached_block) {
+			cached_block->refcount_from_queue--;
+			cached_block->last_used_timestamp = t_now;
+			if (cached_block->data)
+				data->fillBlockData(dp, cached_block->data);
+		}
 	}
 
 	data->setCrack(q->crack_level, q->crack_pos);
-	data->m_generate_minimap = !!m_client->getMinimap();
-	data->m_smooth_lighting = m_cache_smooth_lighting;
-	data->m_enable_water_reflections = m_cache_enable_water_reflections;
+	data->setSmoothLighting(m_cache_smooth_lighting);
+}
+
+void MeshUpdateQueue::cleanupCache()
+{
+	const int mapblock_kB = MAP_BLOCKSIZE * MAP_BLOCKSIZE * MAP_BLOCKSIZE *
+			sizeof(MapNode) / 1000;
+	g_profiler->avg("MeshUpdateQueue MapBlock cache size kB",
+			mapblock_kB * m_cache.size());
+
+	// The cache size is kept roughly below cache_soft_max_size, not letting
+	// anything get older than cache_seconds_max or deleted before 2 seconds.
+	const int cache_seconds_max = 10;
+	const int cache_soft_max_size = m_meshgen_block_cache_size * 1000 / mapblock_kB;
+	int cache_seconds = MYMAX(2, cache_seconds_max -
+			m_cache.size() / (cache_soft_max_size / cache_seconds_max));
+
+	int t_now = time(0);
+
+	for (std::map<v3s16, CachedMapBlockData*>::iterator it = m_cache.begin();
+			it != m_cache.end(); ) {
+		CachedMapBlockData *cached_block = it->second;
+		if (cached_block->refcount_from_queue == 0 &&
+				cached_block->last_used_timestamp < t_now - cache_seconds) {
+			m_cache.erase(it++);
+			delete cached_block;
+		} else {
+			++it;
+		}
+	}
 }
 
 /*
-	MeshUpdateWorkerThread
+	MeshUpdateThread
 */
 
-MeshUpdateWorkerThread::MeshUpdateWorkerThread(Client *client, MeshUpdateQueue *queue_in, MeshUpdateManager *manager) :
-		UpdateThread("Mesh"), m_client(client), m_queue_in(queue_in), m_manager(manager)
+MeshUpdateThread::MeshUpdateThread(Client *client):
+	UpdateThread("Mesh"),
+	m_queue_in(client)
 {
 	m_generation_interval = g_settings->getU16("mesh_generation_interval");
-	m_generation_interval = rangelim(m_generation_interval, 0, 25);
+	m_generation_interval = rangelim(m_generation_interval, 0, 50);
 }
 
-void MeshUpdateWorkerThread::doUpdate()
+void MeshUpdateThread::updateBlock(Map *map, v3s16 p, bool ack_block_to_server,
+		bool urgent)
+{
+	// Allow the MeshUpdateQueue to do whatever it wants
+	m_queue_in.addBlock(map, p, ack_block_to_server, urgent);
+	deferUpdate();
+}
+
+void MeshUpdateThread::doUpdate()
 {
 	QueuedMeshUpdate *q;
-	while ((q = m_queue_in->pop())) {
+	while ((q = m_queue_in.pop())) {
+		if (m_generation_interval)
+			sleep_ms(m_generation_interval);
 		ScopeProfiler sp(g_profiler, "Client: Mesh making (sum)");
 
-		// This generates the mesh:
-		MapBlockMesh *mesh_new = new MapBlockMesh(m_client, q->data);
+		MapBlockMesh *mesh_new = new MapBlockMesh(q->data, m_camera_offset);
 
 		MeshUpdateResult r;
 		r.p = q->p;
 		r.mesh = mesh_new;
-		r.solid_sides = get_solid_sides(q->data);
-		r.ack_list = std::move(q->ack_list);
-		r.urgent = q->urgent;
-		r.map_blocks = std::move(q->map_blocks);
+		r.ack_block_to_server = q->ack_block_to_server;
 
-		m_manager->putResult(r);
-		m_queue_in->done(q->p);
+		m_queue_out.push_back(r);
+
 		delete q;
-		sp.stop();
-
-		porting::TriggerMemoryTrim();
-
-		// do this after we're done so the interval is enforced without
-		// adding extra latency.
-		if (m_generation_interval)
-			sleep_ms(m_generation_interval);
 	}
-}
-
-/*
-	MeshUpdateManager
-*/
-
-MeshUpdateManager::MeshUpdateManager(Client *client):
-	m_queue_in(client)
-{
-	int number_of_threads = rangelim(g_settings->getS32("mesh_generation_threads"), 0, 8);
-
-	// Automatically use 25% of the system cores for mesh generation, max 3
-	if (number_of_threads == 0)
-		number_of_threads = std::min(3U, Thread::getNumberOfProcessors() / 4);
-
-	// use at least one thread
-	number_of_threads = std::max(1, number_of_threads);
-	infostream << "MeshUpdateManager: using " << number_of_threads << " threads" << std::endl;
-
-	for (int i = 0; i < number_of_threads; i++)
-		m_workers.push_back(std::make_unique<MeshUpdateWorkerThread>(client, &m_queue_in, this));
-}
-
-void MeshUpdateManager::updateBlock(Map *map, v3s16 p, bool ack_block_to_server,
-		bool urgent, bool update_neighbors)
-{
-	static thread_local const bool many_neighbors =
-			g_settings->getBool("smooth_lighting")
-			&& !g_settings->getFlag("performance_tradeoffs");
-	if (!m_queue_in.addBlock(map, p, ack_block_to_server, urgent, false)) {
-		warningstream << "Update requested for non-existent block at "
-				<< p << std::endl;
-		return;
-	}
-	if (update_neighbors) {
-		if (many_neighbors) {
-			for (v3s16 dp : g_26dirs)
-				m_queue_in.addBlock(map, p + dp, false, urgent, true);
-		} else {
-			for (v3s16 dp : g_6dirs)
-				m_queue_in.addBlock(map, p + dp, false, urgent, true);
-		}
-	}
-	deferUpdate();
-}
-
-void MeshUpdateManager::putResult(const MeshUpdateResult &result)
-{
-	if (result.urgent)
-		m_queue_out_urgent.push_back(result);
-	else
-		m_queue_out.push_back(result);
-}
-
-bool MeshUpdateManager::getNextResult(MeshUpdateResult &r)
-{
-	if (!m_queue_out_urgent.empty()) {
-		r = m_queue_out_urgent.pop_frontNoEx();
-		return true;
-	}
-
-	if (!m_queue_out.empty()) {
-		r = m_queue_out.pop_frontNoEx();
-		return true;
-	}
-
-	return false;
-}
-
-void MeshUpdateManager::deferUpdate()
-{
-	for (auto &thread : m_workers)
-		thread->deferUpdate();
-}
-
-void MeshUpdateManager::start()
-{
-	for (auto &thread: m_workers)
-		thread->start();
-}
-
-void MeshUpdateManager::stop()
-{
-	for (auto &thread: m_workers)
-		thread->stop();
-}
-
-void MeshUpdateManager::wait()
-{
-	for (auto &thread: m_workers)
-		thread->wait();
-}
-
-bool MeshUpdateManager::isRunning()
-{
-	for (auto &thread: m_workers)
-		if (thread->isRunning())
-			return true;
-	return false;
 }

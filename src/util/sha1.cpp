@@ -24,30 +24,40 @@ SOFTWARE.
 
 */
 
+#include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <cassert>
-
-#define IN_SHA1_CPP
 
 #include "sha1.h"
 
-namespace {
-
-// circular left bit rotation.  MSB wraps around to LSB
-inline Uint32 lrot( Uint32 x, int bits )
+// print out memory in hexadecimal
+void SHA1::hexPrinter( unsigned char* c, int l )
 {
-	return (x<<bits) | (x>>(32 - bits));
+	assert( c );
+	assert( l > 0 );
+	while( l > 0 )
+	{
+		printf( " %02x", *c );
+		l--;
+		c++;
+	}
 }
 
-// Save a 32-bit unsigned integer to memory, in big-endian order
-inline void storeBigEndianUint32( unsigned char* byte, Uint32 num )
+// circular left bit rotation.  MSB wraps around to LSB
+Uint32 SHA1::lrot( Uint32 x, int bits )
 {
+	return (x<<bits) | (x>>(32 - bits));
+};
+
+// Save a 32-bit unsigned integer to memory, in big-endian order
+void SHA1::storeBigEndianUint32( unsigned char* byte, Uint32 num )
+{
+	assert( byte );
 	byte[0] = (unsigned char)(num>>24);
 	byte[1] = (unsigned char)(num>>16);
 	byte[2] = (unsigned char)(num>>8);
 	byte[3] = (unsigned char)num;
-}
-
 }
 
 
@@ -55,7 +65,7 @@ inline void storeBigEndianUint32( unsigned char* byte, Uint32 num )
 SHA1::SHA1()
 {
 	// make sure that the data type is the right size
-	static_assert( sizeof( Uint32 ) * 5 == 20 );
+	assert( sizeof( Uint32 ) * 5 == 20 );
 }
 
 // Destructor ********************************************************
@@ -71,6 +81,7 @@ SHA1::~SHA1()
 void SHA1::process()
 {
 	assert( unprocessedBytes == 64 );
+	//printf( "process: " ); hexPrinter( bytes, 64 ); printf( "\n" );
 	int t;
 	Uint32 a, b, c, d, e, K, f, W[80];
 	// starting values
@@ -92,7 +103,7 @@ void SHA1::process()
 	{
 		if( t < 20 ) {
 			K = 0x5a827999;
-			f = (b & c) | ((~b) & d);
+			f = (b & c) | ((b ^ 0xFFFFFFFF) & d);//TODO: try using ~
 		} else if( t < 40 ) {
 			K = 0x6ed9eba1;
 			f = b ^ c ^ d;
@@ -123,19 +134,20 @@ void SHA1::process()
 }
 
 // addBytes **********************************************************
-void SHA1::addBytes( const char* data, Uint32 num )
+void SHA1::addBytes( const char* data, int num )
 {
 	assert( data );
+	assert( num >= 0 );
 	// add these bytes to the running total
 	size += num;
 	// repeat until all data is processed
 	while( num > 0 )
 	{
 		// number of bytes required to complete block
-		Uint32 needed = 64 - unprocessedBytes;
-		assert( needed <= 64 );
+		int needed = 64 - unprocessedBytes;
+		assert( needed > 0 );
 		// number of bytes to copy (use smaller of two)
-		Uint32 toCopy = (num < needed) ? num : needed;
+		int toCopy = (num < needed) ? num : needed;
 		// Copy the bytes
 		memcpy( bytes + unprocessedBytes, data, toCopy );
 		// Bytes have been copied
@@ -149,7 +161,7 @@ void SHA1::addBytes( const char* data, Uint32 num )
 }
 
 // digest ************************************************************
-void SHA1::getDigest(unsigned char *digest)
+unsigned char* SHA1::getDigest()
 {
 	// save the message size
 	Uint32 totalBitsL = size << 3;
@@ -167,16 +179,20 @@ void SHA1::getDigest(unsigned char *digest)
 		addBytes( (char*)footer, 64 - unprocessedBytes);
 	assert( unprocessedBytes <= 56 );
 	// how many zeros do we need
-	Uint32 neededZeros = 56 - unprocessedBytes;
+	int neededZeros = 56 - unprocessedBytes;
 	// store file size (in bits) in big-endian format
 	storeBigEndianUint32( footer + neededZeros    , totalBitsH );
 	storeBigEndianUint32( footer + neededZeros + 4, totalBitsL );
 	// finish the final block
 	addBytes( (char*)footer, neededZeros + 8 );
+	// allocate memory for the digest bytes
+	unsigned char* digest = (unsigned char*)malloc( 20 );
 	// copy the digest bytes
 	storeBigEndianUint32( digest, H0 );
 	storeBigEndianUint32( digest + 4, H1 );
 	storeBigEndianUint32( digest + 8, H2 );
 	storeBigEndianUint32( digest + 12, H3 );
 	storeBigEndianUint32( digest + 16, H4 );
+	// return the digest
+	return digest;
 }

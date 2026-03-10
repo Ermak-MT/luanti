@@ -1,3 +1,5 @@
+-- Minetest: builtin/item_entity.lua
+
 function core.spawn_item(pos, item)
 	-- Take item in any format
 	local stack = ItemStack(item)
@@ -25,11 +27,14 @@ core.register_entity(":__builtin:item", {
 		visual = "wielditem",
 		visual_size = {x = 0.4, y = 0.4},
 		textures = {""},
+		spritediv = {x = 1, y = 1},
+		initial_sprite_basepos = {x = 0, y = 0},
 		is_visible = false,
 	},
 
 	itemstring = "",
 	moving_state = true,
+	slippery_state = false,
 	physical_state = true,
 	-- Item expiry
 	age = 0,
@@ -52,26 +57,23 @@ core.register_entity(":__builtin:item", {
 		local max_count = stack:get_stack_max()
 		local count = math.min(stack:get_count(), max_count)
 		local size = 0.2 + 0.1 * (count / max_count) ^ (1 / 3)
-		local def = core.registered_items[itemname]
-		local glow = def and def.light_source and
-			math.floor(def.light_source / 2 + 0.5)
+		local coll_height = size * 0.75
+		local def = core.registered_nodes[itemname]
+		local glow = def and math.floor(def.light_source / 2 + 0.5)
 
-		local size_bias = 1e-3 * math.random() -- small random bias to counter Z-fighting
-		local c = {-size, -size, -size, size, size, size}
 		self.object:set_properties({
 			is_visible = true,
 			visual = "wielditem",
 			textures = {itemname},
-			visual_size = {x = size + size_bias, y = size + size_bias},
-			collisionbox = c,
+			visual_size = {x = size, y = size},
+			collisionbox = {-size, -coll_height, -size,
+				size, coll_height, size},
+			selectionbox = {-size, -size, -size, size, size, size},
 			automatic_rotate = math.pi * 0.5 * 0.2 / size,
 			wield_item = self.itemstring,
 			glow = glow,
-			infotext = stack:get_description(),
 		})
 
-		-- cache for usage in on_step
-		self._collisionbox = c
 	end,
 
 	get_staticdata = function(self)
@@ -96,13 +98,12 @@ core.register_entity(":__builtin:item", {
 		self.object:set_armor_groups({immortal = 1})
 		self.object:set_velocity({x = 0, y = 2, z = 0})
 		self.object:set_acceleration({x = 0, y = -gravity, z = 0})
-		self._collisionbox = self.initial_properties.collisionbox
 		self:set_item()
 	end,
 
 	try_merge_with = function(self, own_stack, object, entity)
 		if self.age == entity.age then
-			-- Cannot merge with itself
+			-- Can not merge with itself
 			return false
 		end
 
@@ -112,7 +113,7 @@ core.register_entity(":__builtin:item", {
 				own_stack:get_meta() ~= stack:get_meta() or
 				own_stack:get_wear() ~= stack:get_wear() or
 				own_stack:get_free_space() == 0 then
-			-- Cannot merge different or full stack
+			-- Can not merge different or full stack
 			return false
 		end
 
@@ -156,7 +157,7 @@ core.register_entity(":__builtin:item", {
 		end
 	end,
 
-	on_step = function(self, dtime, moveresult)
+	on_step = function(self, dtime)
 		self.age = self.age + dtime
 		if time_to_live > 0 and self.age > time_to_live then
 			self.itemstring = ""
@@ -167,7 +168,7 @@ core.register_entity(":__builtin:item", {
 		local pos = self.object:get_pos()
 		local node = core.get_node_or_nil({
 			x = pos.x,
-			y = pos.y + self._collisionbox[2] - 0.05,
+			y = pos.y + self.object:get_properties().collisionbox[2] - 0.05,
 			z = pos.z
 		})
 		-- Delete in 'ignore' nodes
@@ -177,43 +178,6 @@ core.register_entity(":__builtin:item", {
 			return
 		end
 
-		-- Prevent assert when item_entity is attached
-		if moveresult == nil and self.object:get_attach() then
-			return
-		end
-
-		if self.force_out then
-			-- This code runs after the entity got a push from the is_stuck code.
-			-- It makes sure the entity is entirely outside the solid node
-			local c = self._collisionbox
-			local s = self.force_out_start
-			local f = self.force_out
-			local ok = (f.x > 0 and pos.x + c[1] > s.x + 0.5) or
-				(f.y > 0 and pos.y + c[2] > s.y + 0.5) or
-				(f.z > 0 and pos.z + c[3] > s.z + 0.5) or
-				(f.x < 0 and pos.x + c[4] < s.x - 0.5) or
-				(f.z < 0 and pos.z + c[6] < s.z - 0.5)
-			if ok then
-				-- Item was successfully forced out
-				self.force_out = nil
-				self:enable_physics()
-				return
-			end
-		end
-
-		if not self.physical_state then
-			return -- Don't do anything
-		end
-
-		assert(moveresult,
-			"Collision info missing, this is caused by an out-of-date/buggy mod or game")
-
-		if not moveresult.collides then
-			-- future TODO: items should probably decelerate in air
-			return
-		end
-
-		-- Push item out when stuck inside solid node
 		local is_stuck = false
 		local snode = core.get_node_or_nil(pos)
 		if snode then
@@ -223,6 +187,7 @@ core.register_entity(":__builtin:item", {
 				and (sdef.node_box == nil or sdef.node_box.type == "regular")
 		end
 
+		-- Push item out when stuck inside solid node
 		if is_stuck then
 			local shootdir
 			local order = {
@@ -258,49 +223,69 @@ core.register_entity(":__builtin:item", {
 				self.force_out_start = vector.round(pos)
 				return
 			end
+		elseif self.force_out then
+			-- This code runs after the entity got a push from the above code.
+			-- It makes sure the entity is entirely outside the solid node
+			local c = self.object:get_properties().collisionbox
+			local s = self.force_out_start
+			local f = self.force_out
+			local ok = (f.x > 0 and pos.x + c[1] > s.x + 0.5) or
+				(f.y > 0 and pos.y + c[2] > s.y + 0.5) or
+				(f.z > 0 and pos.z + c[3] > s.z + 0.5) or
+				(f.x < 0 and pos.x + c[4] < s.x - 0.5) or
+				(f.z < 0 and pos.z + c[6] < s.z - 0.5)
+			if ok then
+				-- Item was successfully forced out
+				self.force_out = nil
+				self:enable_physics()
+			end
 		end
 
-		node = nil -- ground node we're colliding with
-		if moveresult.touching_ground then
-			for _, info in ipairs(moveresult.collisions) do
-				if info.axis == "y" then
-					node = core.get_node(info.node_pos)
-					break
-				end
-			end
+		if not self.physical_state then
+			return -- Don't do anything
 		end
 
 		-- Slide on slippery nodes
+		local vel = self.object:get_velocity()
 		local def = node and core.registered_nodes[node.name]
-		local keep_movement = false
+		local is_moving = (def and not def.walkable) or
+			vel.x ~= 0 or vel.y ~= 0 or vel.z ~= 0
+		local is_slippery = false
 
-		if def then
+		if def and def.walkable then
 			local slippery = core.get_item_group(node.name, "slippery")
-			local vel = self.object:get_velocity()
-			if slippery ~= 0 and (math.abs(vel.x) > 0.1 or math.abs(vel.z) > 0.1) then
+			is_slippery = slippery ~= 0
+			if is_slippery and (math.abs(vel.x) > 0.2 or math.abs(vel.z) > 0.2) then
 				-- Horizontal deceleration
-				local factor = math.min(4 / (slippery + 4) * dtime, 1)
-				self.object:set_velocity({
-					x = vel.x * (1 - factor),
+				local slip_factor = 4.0 / (slippery + 4)
+				self.object:set_acceleration({
+					x = -vel.x * slip_factor,
 					y = 0,
-					z = vel.z * (1 - factor)
+					z = -vel.z * slip_factor
 				})
-				keep_movement = true
+			elseif vel.y == 0 then
+				is_moving = false
 			end
 		end
 
-		if not keep_movement then
-			self.object:set_velocity({x=0, y=0, z=0})
-		end
-
-		if self.moving_state == keep_movement then
+		if self.moving_state == is_moving and
+				self.slippery_state == is_slippery then
 			-- Do not update anything until the moving state changes
 			return
 		end
-		self.moving_state = keep_movement
 
-		-- Only collect items if not moving
-		if self.moving_state then
+		self.moving_state = is_moving
+		self.slippery_state = is_slippery
+
+		if is_moving then
+			self.object:set_acceleration({x = 0, y = -gravity, z = 0})
+		else
+			self.object:set_acceleration({x = 0, y = 0, z = 0})
+			self.object:set_velocity({x = 0, y = 0, z = 0})
+		end
+
+		--Only collect items if not moving
+		if is_moving then
 			return
 		end
 		-- Collect the items around to merge with
@@ -322,29 +307,16 @@ core.register_entity(":__builtin:item", {
 		end
 	end,
 
-	on_punch = function(self, hitter, ...)
-		if self.itemstring == "" then
-			self.object:remove()
-			return
+	on_punch = function(self, hitter)
+		local inv = hitter:get_inventory()
+		if inv and self.itemstring ~= "" then
+			local left = inv:add_item("main", self.itemstring)
+			if left and not left:is_empty() then
+				self:set_item(left)
+				return
+			end
 		end
-
-		-- Call on_pickup callback in item definition.
-		local itemstack = ItemStack(self.itemstring)
-		local callback = itemstack:get_definition().on_pickup
-
-		local ret = callback(itemstack, hitter, {type = "object", ref = self.object}, ...)
-		if not ret then
-			-- Don't modify (and don't reset rotation)
-			return
-		end
-		itemstack = ItemStack(ret)
-
-		-- Handle the leftover itemstack
-		if itemstack:is_empty() then
-			self.itemstring = ""
-			self.object:remove()
-		else
-			self:set_item(itemstack)
-		end
+		self.itemstring = ""
+		self.object:remove()
 	end,
 })

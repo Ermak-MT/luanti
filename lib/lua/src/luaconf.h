@@ -143,14 +143,6 @@
 #define LUA_INTEGER	ptrdiff_t
 
 
-/* MINETEST-SPECIFIC CHANGE: make sure API functions conform to the C ABI. */
-#if defined(__cplusplus)
-#define LUAI_API_EXTERN extern "C"
-#else
-#define LUAI_API_EXTERN extern
-#endif
-
-
 /*
 @@ LUA_API is a mark for all core API functions.
 @@ LUALIB_API is a mark for all standard library functions.
@@ -162,14 +154,14 @@
 #if defined(LUA_BUILD_AS_DLL)
 
 #if defined(LUA_CORE) || defined(LUA_LIB)
-#define LUA_API LUAI_API_EXTERN __declspec(dllexport)
+#define LUA_API __declspec(dllexport)
 #else
-#define LUA_API LUAI_API_EXTERN __declspec(dllimport)
+#define LUA_API __declspec(dllimport)
 #endif
 
 #else
 
-#define LUA_API		LUAI_API_EXTERN
+#define LUA_API		extern
 
 #endif
 
@@ -341,14 +333,14 @@
 ** CHANGE it to undefined as soon as your programs use only '...' to
 ** access vararg parameters (instead of the old 'arg' table).
 */
-#undef LUA_COMPAT_VARARG
+#define LUA_COMPAT_VARARG
 
 /*
 @@ LUA_COMPAT_MOD controls compatibility with old math.mod function.
 ** CHANGE it to undefined as soon as your programs use 'math.fmod' or
 ** the new '%' operator instead of 'math.mod'.
 */
-#undef LUA_COMPAT_MOD
+#define LUA_COMPAT_MOD
 
 /*
 @@ LUA_COMPAT_LSTR controls compatibility with old long string nesting
@@ -356,14 +348,14 @@
 ** CHANGE it to 2 if you want the old behaviour, or undefine it to turn
 ** off the advisory error when nesting [[...]].
 */
-#undef LUA_COMPAT_LSTR
+#define LUA_COMPAT_LSTR		1
 
 /*
 @@ LUA_COMPAT_GFIND controls compatibility with old 'string.gfind' name.
 ** CHANGE it to undefined as soon as you rename 'string.gfind' to
 ** 'string.gmatch'.
 */
-#undef LUA_COMPAT_GFIND
+#define LUA_COMPAT_GFIND
 
 /*
 @@ LUA_COMPAT_OPENLIB controls compatibility with old 'luaL_openlib'
@@ -371,7 +363,7 @@
 ** CHANGE it to undefined as soon as you replace to 'luaL_register'
 ** your uses of 'luaL_openlib'
 */
-#undef LUA_COMPAT_OPENLIB
+#define LUA_COMPAT_OPENLIB
 
 
 

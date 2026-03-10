@@ -1,16 +1,31 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include <set>
 #include <string>
 #include <vector>
-#include <optional>
+#include <list>
 
 #include "irrlichttypes.h"
 #include "util/enriched_string.h"
+#include "settings.h"
 
 // Chat console related classes
 
@@ -42,8 +57,6 @@ struct ChatFormattedFragment
 	EnrichedString text;
 	// starting column
 	u32 column;
-	// web link is empty for most frags
-	std::string weblink;
 	// formatting
 	//u8 bold:1;
 };
@@ -81,6 +94,8 @@ public:
 	// Delete lines older than maxAge.
 	void deleteByAge(f32 maxAge);
 
+	// Get number of columns, 0 if reformat has not been called yet.
+	u32 getColumns() const;
 	// Get number of rows, 0 if reformat has not been called yet.
 	u32 getRows() const;
 	// Update console size and reformat all formatted lines.
@@ -95,13 +110,8 @@ public:
 	void scrollAbsolute(s32 scroll);
 	// Scroll to bottom of buffer (newest)
 	void scrollBottom();
-
-	// Functions for keeping track of whether the lines were modified by any
-	// preceding operations
-	// If they were not changed, getLineCount() and getLine() output the same as
-	// before
-	bool getLinesModified() const { return m_lines_modified; }
-	void resetLinesModified() { m_lines_modified = false; }
+	// Scroll to top of buffer (oldest)
+	void scrollTop();
 
 	// Format a chat line for the given number of columns.
 	// Appends the formatted lines to the destination array and
@@ -110,9 +120,7 @@ public:
 			std::vector<ChatFormattedLine>& destination) const;
 
 	void resize(u32 scrollback);
-
-	// Get the current scroll position
-	s32 getScrollPosition() const { return m_scroll; }
+protected:
 	s32 getTopScrollPos() const;
 	s32 getBottomScrollPos() const;
 
@@ -132,16 +140,6 @@ private:
 	std::vector<ChatFormattedLine> m_formatted;
 	// Empty formatted line, for error returns
 	ChatFormattedLine m_empty_formatted_line;
-
-	// Enable clickable chat weblinks
-	bool m_cache_clickable_chat_weblinks;
-	// Color of clickable chat weblinks
-	video::SColor m_cache_chat_weblink_color;
-
-	// Whether the lines were modified since last markLinesUnchanged()
-	// Is always set to true when m_unformatted is modified, because that's what
-	// determines the output of getLineCount() and getLine()
-	bool m_lines_modified = true;
 };
 
 class ChatPrompt
@@ -158,10 +156,10 @@ public:
 	void addToHistory(const std::wstring &line);
 
 	// Get current line
-	std::wstring getLine() const { return getLineRef(); }
+	std::wstring getLine() const { return m_line; }
 
 	// Get section of line that is currently selected
-	std::wstring getSelection() const { return getLineRef().substr(m_cursor, m_cursor_len); }
+	std::wstring getSelection() const { return m_line.substr(m_cursor, m_cursor_len); }
 
 	// Clear the current line
 	void clear();
@@ -175,7 +173,7 @@ public:
 	void historyNext();
 
 	// Nick completion
-	void nickCompletion(const std::set<std::string> &names, bool backwards);
+	void nickCompletion(const std::list<std::string>& names, bool backwards);
 
 	// Update console size and reformat the visible portion of the prompt
 	void reformat(u32 cols);
@@ -219,33 +217,18 @@ public:
 	void cursorOperation(CursorOp op, CursorOpDir dir, CursorOpScope scope);
 
 protected:
-	const std::wstring &getLineRef() const;
-
-	std::wstring &makeLineRef();
-
 	// set m_view to ensure that 0 <= m_view <= m_cursor < m_view + m_cols
 	// if line can be fully shown, set m_view to zero
 	// else, also ensure m_view <= m_line.size() + 1 - m_cols
 	void clampView();
 
 private:
-	struct HistoryEntry {
-		std::wstring line;
-		// If line is edited, saved holds the unedited version.
-		std::optional<std::wstring> saved;
-
-		HistoryEntry(const std::wstring &line): line(line) {}
-
-		bool operator==(const HistoryEntry &other);
-		bool operator!=(const HistoryEntry &other) { return !(*this == other); }
-	};
-
 	// Prompt prefix
 	std::wstring m_prompt = L"";
-	// Non-historical edited line
+	// Currently edited line
 	std::wstring m_line = L"";
 	// History buffer
-	std::vector<HistoryEntry> m_history;
+	std::vector<std::wstring> m_history;
 	// History index (0 <= m_history_index <= m_history.size())
 	u32 m_history_index = 0;
 	// Maximum number of history entries

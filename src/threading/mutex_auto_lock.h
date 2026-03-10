@@ -26,8 +26,5 @@ DEALINGS IN THE SOFTWARE.
 #pragma once
 
 #include <mutex>
-
-/// @deprecated use std::lock_guard directly
-using MutexAutoLock = std::lock_guard<std::mutex>;
-/// @deprecated use std::lock_guard directly
-using RecursiveMutexAutoLock = std::lock_guard<std::recursive_mutex>;
+using MutexAutoLock = std::unique_lock<std::mutex>;
+using RecursiveMutexAutoLock = std::unique_lock<std::recursive_mutex>;

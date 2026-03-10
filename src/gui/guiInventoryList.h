@@ -1,14 +1,27 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #include "inventorymanager.h"
-#include <IGUIElement.h>
-#include <IGUIEnvironment.h>
-#include "irr_v2d.h"
-
+#include "irrlichttypes_extrabloated.h"
+#include "util/string.h"
 
 class GUIFormSpecMenu;
 
@@ -21,19 +34,11 @@ public:
 
 		ItemSpec(const InventoryLocation &a_inventoryloc,
 				const std::string &a_listname,
-				s32 a_i,
-				const v2s32 slotsize) :
+				s32 a_i) :
 			inventoryloc(a_inventoryloc),
 			listname(a_listname),
-			i(a_i),
-			slotsize(slotsize)
+			i(a_i)
 		{
-		}
-
-		bool operator==(const ItemSpec& other) const
-		{
-			return inventoryloc == other.inventoryloc &&
-					listname == other.listname && i == other.i;
 		}
 
 		bool isValid() const { return i != -1; }
@@ -41,7 +46,6 @@ public:
 		InventoryLocation inventoryloc;
 		std::string listname;
 		s32 i = -1;
-		v2s32 slotsize;
 	};
 
 	// options for inventorylists that are setable with the lua api
@@ -69,11 +73,9 @@ public:
 		const Options &options,
 		gui::IGUIFont *font);
 
-	void draw() override;
+	virtual void draw() override;
 
-	bool OnEvent(const SEvent &event) override;
-
-	bool isPointInside(const core::position2d<s32> &point) const override;
+	virtual bool OnEvent(const SEvent &event) override;
 
 	const InventoryLocation &getInventoryloc() const
 	{
@@ -97,11 +99,6 @@ public:
 		m_options.slotbordercolor = slotbordercolor;
 	}
 
-	const v2s32 getSlotSize() const noexcept
-	{
-		return m_slot_size;
-	}
-
 	// returns -1 if not item is at pos p
 	s32 getItemIndexAtPos(v2s32 p) const;
 
@@ -110,7 +107,7 @@ private:
 	const InventoryLocation m_inventoryloc;
 	const std::string m_listname;
 
-	// the specified width and height of the shown inventorylist in itemslots
+	// specifies the width and height of the inventorylist in itemslots
 	const v2s32 m_geom;
 	// the first item's index in inventory
 	const s32 m_start_item_i;
@@ -130,7 +127,4 @@ private:
 
 	// the index of the hovered item; -1 if no item is hovered
 	s32 m_hovered_i;
-
-	// we do not want to write a warning on every draw
-	bool m_already_warned;
 };

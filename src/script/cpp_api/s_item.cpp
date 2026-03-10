@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "cpp_api/s_item.h"
 #include "cpp_api/s_internal.h"
@@ -13,9 +28,6 @@
 #include "util/pointedthing.h"
 #include "inventory.h"
 #include "inventorymanager.h"
-
-#define WRAP_LUAERROR(e, detail) \
-	LuaError(std::string(__FUNCTION__) + ": " + (e).what() + ". " detail)
 
 bool ScriptApiItem::item_OnDrop(ItemStack &item,
 		ServerActiveObject *dropper, v3f pos)
@@ -37,21 +49,20 @@ bool ScriptApiItem::item_OnDrop(ItemStack &item,
 		try {
 			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
 	}
 	lua_pop(L, 2);  // Pop item and error handler
 	return true;
 }
 
-bool ScriptApiItem::item_OnPlace(std::optional<ItemStack> &ret_item,
+bool ScriptApiItem::item_OnPlace(ItemStack &item,
 		ServerActiveObject *placer, const PointedThing &pointed)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
 	int error_handler = PUSH_ERROR_HANDLER(L);
 
-	const ItemStack &item = *ret_item;
 	// Push callback function on stack
 	if (!getItemCallback(item.name.c_str(), "on_place"))
 		return false;
@@ -68,25 +79,22 @@ bool ScriptApiItem::item_OnPlace(std::optional<ItemStack> &ret_item,
 	PCALL_RES(lua_pcall(L, 3, 1, error_handler));
 	if (!lua_isnil(L, -1)) {
 		try {
-			ret_item = read_item(L, -1, getServer()->idef());
+			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
-	} else {
-		ret_item = std::nullopt;
 	}
 	lua_pop(L, 2);  // Pop item and error handler
 	return true;
 }
 
-bool ScriptApiItem::item_OnUse(std::optional<ItemStack> &ret_item,
+bool ScriptApiItem::item_OnUse(ItemStack &item,
 		ServerActiveObject *user, const PointedThing &pointed)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
 	int error_handler = PUSH_ERROR_HANDLER(L);
 
-	const ItemStack &item = *ret_item;
 	// Push callback function on stack
 	if (!getItemCallback(item.name.c_str(), "on_use"))
 		return false;
@@ -98,25 +106,22 @@ bool ScriptApiItem::item_OnUse(std::optional<ItemStack> &ret_item,
 	PCALL_RES(lua_pcall(L, 3, 1, error_handler));
 	if(!lua_isnil(L, -1)) {
 		try {
-			ret_item = read_item(L, -1, getServer()->idef());
+			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
-	} else {
-		ret_item = std::nullopt;
 	}
 	lua_pop(L, 2);  // Pop item and error handler
 	return true;
 }
 
-bool ScriptApiItem::item_OnSecondaryUse(std::optional<ItemStack> &ret_item,
+bool ScriptApiItem::item_OnSecondaryUse(ItemStack &item,
 		ServerActiveObject *user, const PointedThing &pointed)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
 	int error_handler = PUSH_ERROR_HANDLER(L);
 
-	const ItemStack &item = *ret_item;
 	if (!getItemCallback(item.name.c_str(), "on_secondary_use"))
 		return false;
 
@@ -126,12 +131,10 @@ bool ScriptApiItem::item_OnSecondaryUse(std::optional<ItemStack> &ret_item,
 	PCALL_RES(lua_pcall(L, 3, 1, error_handler));
 	if (!lua_isnil(L, -1)) {
 		try {
-			ret_item = read_item(L, -1, getServer()->idef());
+			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
-	} else {
-		ret_item = std::nullopt;
 	}
 	lua_pop(L, 2);  // Pop item and error handler
 	return true;
@@ -162,7 +165,7 @@ bool ScriptApiItem::item_OnCraft(ItemStack &item, ServerActiveObject *user,
 		try {
 			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
 	}
 	lua_pop(L, 2);  // Pop item and error handler
@@ -194,7 +197,7 @@ bool ScriptApiItem::item_CraftPredict(ItemStack &item, ServerActiveObject *user,
 		try {
 			item = read_item(L, -1, getServer()->idef());
 		} catch (LuaError &e) {
-			throw WRAP_LUAERROR(e, "item=" + item.name);
+			throw LuaError(std::string(e.what()) + ". item=" + item.name);
 		}
 	}
 	lua_pop(L, 2);  // Pop item and error handler
@@ -223,7 +226,7 @@ bool ScriptApiItem::getItemCallback(const char *name, const char *callbackname,
 		// Report error and clean up
 		errorstream << "Item \"" << name << "\" not defined";
 		if (p)
-			errorstream << " at position " << *p;
+			errorstream << " at position " << PP(*p);
 		errorstream << std::endl;
 		lua_pop(L, 1);
 

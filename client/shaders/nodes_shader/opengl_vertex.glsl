@@ -1,90 +1,32 @@
+uniform mat4 mWorldViewProj;
 uniform mat4 mWorld;
+
 // Color of the light emitted by the sun.
 uniform vec3 dayLight;
+uniform vec3 eyePosition;
 
 // The cameraOffset is the current center of the visible world.
-uniform highp vec3 cameraOffset;
+uniform vec3 cameraOffset;
 uniform float animationTimer;
 
-VARYING_ vec3 vNormal;
+varying vec3 vPosition;
 // World position in the visible world (i.e. relative to the cameraOffset.)
 // This can be used for many shader effects without loss of precision.
 // If the absolute position is required it can be calculated with
 // cameraOffset + worldPosition (for large coordinates the limits of float
 // precision must be considered).
-VARYING_ vec3 worldPosition;
-// The centroid keyword ensures that after interpolation the texture coordinates
-// lie within the same bounds when MSAA is en- or disabled.
-// This fixes the stripes problem with nearest-neighbor textures and MSAA.
-CENTROID_ VARYING_ lowp vec4 varColor;
-CENTROID_ VARYING_ mediump vec2 varTexCoord;
-CENTROID_ VARYING_ float varTexLayer; // actually int
-CENTROID_ VARYING_ float nightRatio;
+varying vec3 worldPosition;
 
-#ifdef ENABLE_DYNAMIC_SHADOWS
-	// shadow uniforms
-	uniform vec3 v_LightDirection;
-	uniform float f_textureresolution;
-	uniform mat4 m_ShadowViewProj;
-	uniform float f_shadowfar;
-	uniform float f_shadow_strength;
-	uniform float f_timeofday;
-	uniform vec4 CameraPos;
+varying vec3 eyeVec;
+varying vec3 lightVec;
+varying vec3 tsEyeVec;
+varying vec3 tsLightVec;
+varying float area_enable_parallax;
 
-	VARYING_ float cosLight;
-	VARYING_ float normalOffsetScale;
-	VARYING_ float adj_shadow_strength;
-	VARYING_ float f_normal_length;
-	VARYING_ vec3 shadow_position;
-	VARYING_ float perspective_factor;
-#endif
-
-VARYING_ highp vec3 eyeVec;
 // Color of the light emitted by the light sources.
 const vec3 artificialLight = vec3(1.04, 1.04, 1.04);
-
-#ifdef ENABLE_DYNAMIC_SHADOWS
-
-uniform float xyPerspectiveBias0;
-uniform float xyPerspectiveBias1;
-uniform float zPerspectiveBias;
-
-vec4 getRelativePosition(in vec4 position)
-{
-	vec2 l = position.xy - CameraPos.xy;
-	vec2 s = l / abs(l);
-	s = (1.0 - s * CameraPos.xy);
-	l /= s;
-	return vec4(l, s);
-}
-
-float getPerspectiveFactor(in vec4 relativePosition)
-{
-	float pDistance = length(relativePosition.xy);
-	float pFactor = pDistance * xyPerspectiveBias0 + xyPerspectiveBias1;
-	return pFactor;
-}
-
-vec4 applyPerspectiveDistortion(in vec4 position)
-{
-	vec4 l = getRelativePosition(position);
-	float pFactor = getPerspectiveFactor(l);
-	l.xy /= pFactor;
-	position.xy = l.xy * l.zw + CameraPos.xy;
-	position.z *= zPerspectiveBias;
-	return position;
-}
-
-#if __VERSION__ >= 130
-#define mtsmoothstep smoothstep
-#else
-float mtsmoothstep(in float edge0, in float edge1, in float x)
-{
-	float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-	return t * t * (3.0 - 2.0 * t);
-}
-#endif
-#endif
+const float e = 2.718281828459;
+const float BS = 10.0;
 
 
 float smoothCurve(float x)
@@ -104,7 +46,8 @@ float smoothTriangleWave(float x)
 	return smoothCurve(triangleWave(x)) * 2.0 - 1.0;
 }
 
-#if MATERIAL_WAVING_LIQUID && ENABLE_WAVING_WATER
+// OpenGL < 4.3 does not support continued preprocessor lines
+#if (MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_TRANSPARENT || MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_OPAQUE || MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_BASIC) && ENABLE_WAVING_WATER
 
 //
 // Simple, fast noise function.
@@ -140,21 +83,27 @@ float snoise(vec3 p)
 
 #endif
 
-
-
-
 void main(void)
 {
-#ifdef USE_ARRAY_TEXTURE
-	varTexLayer = inVertexAux;
-#endif
-	varTexCoord = inTexCoord0.st;
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	//TODO: make offset depending on view angle and parallax uv displacement
+	//thats for textures that doesnt align vertically, like dirt with grass
+	//gl_TexCoord[0].y += 0.008;
 
-	float disp_x;
-	float disp_z;
-// OpenGL < 4.3 does not support continued preprocessor lines
-#if (MATERIAL_TYPE == TILE_MATERIAL_WAVING_LEAVES && ENABLE_WAVING_LEAVES) || (MATERIAL_TYPE == TILE_MATERIAL_WAVING_PLANTS && ENABLE_WAVING_PLANTS)
-	vec4 pos2 = mWorld * inVertexPosition;
+	//Allow parallax/relief mapping only for certain kind of nodes
+	//Variable is also used to control area of the effect
+#if (DRAW_TYPE == NDT_NORMAL || DRAW_TYPE == NDT_LIQUID || DRAW_TYPE == NDT_FLOWINGLIQUID)
+	area_enable_parallax = 1.0;
+#else
+	area_enable_parallax = 0.0;
+#endif
+
+
+float disp_x;
+float disp_z;
+#if (MATERIAL_TYPE == TILE_MATERIAL_WAVING_LEAVES && ENABLE_WAVING_LEAVES) || \
+	(MATERIAL_TYPE == TILE_MATERIAL_WAVING_PLANTS && ENABLE_WAVING_PLANTS)
+	vec4 pos2 = mWorld * gl_Vertex;
 	float tOffset = (pos2.x + pos2.y) * 0.001 + pos2.z * 0.002;
 	disp_x = (smoothTriangleWave(animationTimer * 23.0 + tOffset) +
 		smoothTriangleWave(animationTimer * 11.0 + tOffset)) * 0.4;
@@ -163,108 +112,86 @@ void main(void)
 		smoothTriangleWave(animationTimer * 13.0 + tOffset)) * 0.5;
 #endif
 
-	vec4 pos = inVertexPosition;
-#if MATERIAL_WAVING_LIQUID && ENABLE_WAVING_WATER
+	worldPosition = (mWorld * gl_Vertex).xyz;
+
+// OpenGL < 4.3 does not support continued preprocessor lines
+#if (MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_TRANSPARENT || MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_OPAQUE || MATERIAL_TYPE == TILE_MATERIAL_WAVING_LIQUID_BASIC) && ENABLE_WAVING_WATER
 	// Generate waves with Perlin-type noise.
 	// The constants are calibrated such that they roughly
 	// correspond to the old sine waves.
-	vec3 wavePos = (mWorld * pos).xyz + cameraOffset;
+	vec4 pos = gl_Vertex;
+	vec3 wavePos = worldPosition + cameraOffset;
 	// The waves are slightly compressed along the z-axis to get
 	// wave-fronts along the x-axis.
-	wavePos.x /= WATER_WAVE_LENGTH * 3.0;
-	wavePos.z /= WATER_WAVE_LENGTH * 2.0;
-	wavePos.z += animationTimer * WATER_WAVE_SPEED * 10.0;
-	pos.y += (snoise(wavePos) - 1.0) * WATER_WAVE_HEIGHT * 5.0;
+	wavePos.x /= WATER_WAVE_LENGTH * 3;
+	wavePos.z /= WATER_WAVE_LENGTH * 2;
+	wavePos.z += animationTimer * WATER_WAVE_SPEED * 10;
+	pos.y += (snoise(wavePos) - 1) * WATER_WAVE_HEIGHT * 5;
+	gl_Position = mWorldViewProj * pos;
 #elif MATERIAL_TYPE == TILE_MATERIAL_WAVING_LEAVES && ENABLE_WAVING_LEAVES
+	vec4 pos = gl_Vertex;
 	pos.x += disp_x;
 	pos.y += disp_z * 0.1;
 	pos.z += disp_z;
+	gl_Position = mWorldViewProj * pos;
 #elif MATERIAL_TYPE == TILE_MATERIAL_WAVING_PLANTS && ENABLE_WAVING_PLANTS
-	// bottom of plant doesn't wave
-	if (varTexCoord.y < 0.05) {
+	vec4 pos = gl_Vertex;
+	if (gl_TexCoord[0].y < 0.05) {
 		pos.x += disp_x;
 		pos.z += disp_z;
 	}
-#endif
-	worldPosition = (mWorld * pos).xyz;
 	gl_Position = mWorldViewProj * pos;
-
-	eyeVec = -(mWorldView * pos).xyz;
-#ifdef SECONDSTAGE
-	normalPass = normalize((inVertexNormal+1)/2);
+#else
+	gl_Position = mWorldViewProj * gl_Vertex;
 #endif
-	vNormal = inVertexNormal;
+
+
+	vPosition = gl_Position.xyz;
+
+	// Don't generate heightmaps when too far from the eye
+	float dist = distance (vec3(0.0, 0.0, 0.0), vPosition);
+	if (dist > 150.0) {
+		area_enable_parallax = 0.0;
+	}
+
+	vec3 sunPosition = vec3 (0.0, eyePosition.y * BS + 900.0, 0.0);
+
+	vec3 normal, tangent, binormal;
+	normal = normalize(gl_NormalMatrix * gl_Normal);
+	tangent = normalize(gl_NormalMatrix * gl_MultiTexCoord1.xyz);
+	binormal = normalize(gl_NormalMatrix * gl_MultiTexCoord2.xyz);
+
+	vec3 v;
+
+	lightVec = sunPosition - worldPosition;
+	v.x = dot(lightVec, tangent);
+	v.y = dot(lightVec, binormal);
+	v.z = dot(lightVec, normal);
+	tsLightVec = normalize (v);
+
+	eyeVec = -(gl_ModelViewMatrix * gl_Vertex).xyz;
+	v.x = dot(eyeVec, tangent);
+	v.y = dot(eyeVec, binormal);
+	v.z = dot(eyeVec, normal);
+	tsEyeVec = normalize (v);
 
 	// Calculate color.
-	vec4 color = inVertexColor;
 	// Red, green and blue components are pre-multiplied with
 	// the brightness, so now we have to multiply these
 	// colors with the color of the incoming light.
 	// The pre-baked colors are halved to prevent overflow.
+	vec4 color;
 	// The alpha gives the ratio of sunlight in the incoming light.
-	nightRatio = 1.0 - color.a;
-	color.rgb = color.rgb * (color.a * dayLight.rgb +
-		nightRatio * artificialLight.rgb) * 2.0;
-	color.a = 1.0;
+	float nightRatio = 1 - gl_Color.a;
+	color.rgb = gl_Color.rgb * (gl_Color.a * dayLight.rgb + 
+		nightRatio * artificialLight.rgb) * 2;
+	color.a = 1;
 
 	// Emphase blue a bit in darker places
 	// See C++ implementation in mapblock_mesh.cpp final_color_blend()
-	float brightness = (color.r + color.g + color.b) / 3.0;
+	float brightness = (color.r + color.g + color.b) / 3;
 	color.b += max(0.0, 0.021 - abs(0.2 * brightness - 0.021) +
 		0.07 * brightness);
 
-	varColor = clamp(color, 0.0, 1.0);
-
-#ifdef ENABLE_DYNAMIC_SHADOWS
-	if (f_shadow_strength > 0.0) {
-#if MATERIAL_TYPE == TILE_MATERIAL_WAVING_PLANTS && ENABLE_WAVING_PLANTS
-		// The shadow shaders don't apply waving when creating the shadow-map.
-		// We are using the not waved inVertexPosition to avoid ugly self-shadowing.
-		vec4 shadow_pos = inVertexPosition;
-#else
-		vec4 shadow_pos = pos;
-#endif
-		vec3 nNormal;
-		f_normal_length = length(vNormal);
-
-		/* normalOffsetScale is in world coordinates (1/10th of a meter)
-		   z_bias is in light space coordinates */
-		float normalOffsetScale, z_bias;
-		float pFactor = getPerspectiveFactor(getRelativePosition(m_ShadowViewProj * mWorld * shadow_pos));
-		if (f_normal_length > 0.0) {
-			nNormal = normalize(vNormal);
-			cosLight = max(1e-5, dot(nNormal, -v_LightDirection));
-			float sinLight = pow(1.0 - pow(cosLight, 2.0), 0.5);
-			normalOffsetScale = 2.0 * pFactor * pFactor * sinLight * min(f_shadowfar, 500.0) /
-					xyPerspectiveBias1 / f_textureresolution;
-			z_bias = 1.0 * sinLight / cosLight;
-		}
-		else {
-			nNormal = vec3(0.0);
-			cosLight = clamp(dot(v_LightDirection, normalize(vec3(v_LightDirection.x, 0.0, v_LightDirection.z))), 1e-2, 1.0);
-			float sinLight = pow(1.0 - pow(cosLight, 2.0), 0.5);
-			normalOffsetScale = 0.0;
-			z_bias = 3.6e3 * sinLight / cosLight;
-		}
-		z_bias *= pFactor * pFactor / f_textureresolution / f_shadowfar;
-
-		shadow_position = applyPerspectiveDistortion(m_ShadowViewProj * mWorld * (shadow_pos + vec4(normalOffsetScale * nNormal, 0.0))).xyz;
-#if !defined(ENABLE_TRANSLUCENT_FOLIAGE) || MATERIAL_TYPE != TILE_MATERIAL_WAVING_LEAVES
-		shadow_position.z -= z_bias;
-#endif
-		perspective_factor = pFactor;
-
-		if (f_timeofday < 0.2) {
-			adj_shadow_strength = f_shadow_strength * 0.5 *
-				(1.0 - mtsmoothstep(0.18, 0.2, f_timeofday));
-		} else if (f_timeofday >= 0.8) {
-			adj_shadow_strength = f_shadow_strength * 0.5 *
-				mtsmoothstep(0.8, 0.83, f_timeofday);
-		} else {
-			adj_shadow_strength = f_shadow_strength *
-				mtsmoothstep(0.20, 0.25, f_timeofday) *
-				(1.0 - mtsmoothstep(0.7, 0.8, f_timeofday));
-		}
-	}
-#endif
+	gl_FrontColor = gl_BackColor = clamp(color, 0.0, 1.0);
 }

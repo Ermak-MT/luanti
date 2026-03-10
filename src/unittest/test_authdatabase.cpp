@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2018 bendeutsch, Ben Deutsch <ben@bendeutsch.de>
+/*
+Minetest
+Copyright (C) 2018 bendeutsch, Ben Deutsch <ben@bendeutsch.de>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "test.h"
 
@@ -100,7 +115,7 @@ static TestAuthDatabase g_test_instance;
 void TestAuthDatabase::runTests(IGameDef *gamedef)
 {
 	// fixed directory, for persistence
-	const std::string test_dir = getTestTempDirectory();
+	thread_local const std::string test_dir = getTestTempDirectory();
 
 	// Each set of tests is run twice for each database type:
 	// one where we reuse the same AuthDatabase object (to test local caching),

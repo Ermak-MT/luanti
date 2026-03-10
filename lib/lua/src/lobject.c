@@ -23,6 +23,7 @@
 #include "lvm.h"
 
 
+
 const TValue luaO_nilobject_ = {{NULL}, LUA_TNIL};
 
 

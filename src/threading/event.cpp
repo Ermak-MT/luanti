@@ -24,10 +24,11 @@ DEALINGS IN THE SOFTWARE.
 */
 
 #include "threading/event.h"
+#include "threading/mutex_auto_lock.h"
 
 void Event::wait()
 {
-	std::unique_lock lock(mutex);
+	MutexAutoLock lock(mutex);
 	while (!notified) {
 		cv.wait(lock);
 	}
@@ -37,9 +38,7 @@ void Event::wait()
 
 void Event::signal()
 {
-	{
-		std::lock_guard lock(mutex);
-		notified = true;
-	}
+	MutexAutoLock lock(mutex);
+	notified = true;
 	cv.notify_one();
 }

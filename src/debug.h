@@ -1,16 +1,42 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
+#include <iostream>
 #include <exception>
 #include <cassert>
-#include "log.h" // unused. for convenience.
+#include "gettime.h"
+#include "log.h"
 
-#ifdef _MSC_VER
+#ifdef _WIN32
+	#ifndef _WIN32_WINNT
+		#define _WIN32_WINNT 0x0501
+	#endif
+	#include <windows.h>
+	#ifdef _MSC_VER
+		#include <eh.h>
+	#endif
+	#define NORETURN __declspec(noreturn)
 	#define FUNCTION_NAME __FUNCTION__
 #else
+	#define NORETURN __attribute__ ((__noreturn__))
 	#define FUNCTION_NAME __PRETTY_FUNCTION__
 #endif
 
@@ -25,7 +51,7 @@
 
 /* Abort program execution immediately
  */
-[[noreturn]] extern void fatal_error_fn(
+NORETURN extern void fatal_error_fn(
 		const char *msg, const char *file,
 		unsigned int line, const char *function);
 
@@ -43,7 +69,7 @@
 	defined)
 */
 
-[[noreturn]] extern void sanity_check_fn(
+NORETURN extern void sanity_check_fn(
 		const char *assertion, const char *file,
 		unsigned int line, const char *function);
 
@@ -54,7 +80,6 @@
 
 #define sanity_check(expr) SANITY_CHECK(expr)
 
-std::string debug_describe_exc(const std::exception &e);
 
 void debug_set_exception_handler();
 
@@ -66,10 +91,9 @@ void debug_set_exception_handler();
 	#define BEGIN_DEBUG_EXCEPTION_HANDLER try {
 	#define END_DEBUG_EXCEPTION_HANDLER                        \
 		} catch (std::exception &e) {                          \
-			std::string e_descr = debug_describe_exc(e);       \
 			errorstream << "An unhandled exception occurred: " \
-				<< e_descr << std::endl;                       \
-			FATAL_ERROR(e_descr.c_str());                      \
+				<< e.what() << std::endl;                      \
+			FATAL_ERROR(e.what());                             \
 		}
 #else
 	// Dummy ones

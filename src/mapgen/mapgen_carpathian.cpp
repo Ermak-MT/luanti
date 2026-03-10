@@ -1,15 +1,32 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2017-2019 vlapsley, Vaughan Lapsley <vlapsley@gmail.com>
-// Copyright (C) 2017-2019 paramat
+/*
+Minetest
+Copyright (C) 2017-2019 vlapsley, Vaughan Lapsley <vlapsley@gmail.com>
+Copyright (C) 2017-2019 paramat
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 
 #include <cmath>
 #include "mapgen.h"
 #include "voxel.h"
 #include "noise.h"
+#include "mapblock.h"
 #include "mapnode.h"
 #include "map.h"
+#include "content_sao.h"
 #include "nodedef.h"
 #include "voxelalgorithms.h"
 //#include "profiler.h" // For TimeTaker
@@ -23,7 +40,7 @@
 #include "mapgen_carpathian.h"
 
 
-const FlagDesc flagdesc_mapgen_carpathian[] = {
+FlagDesc flagdesc_mapgen_carpathian[] = {
 	{"caverns", MGCARPATHIAN_CAVERNS},
 	{"rivers",  MGCARPATHIAN_RIVERS},
 	{NULL,      0}
@@ -33,7 +50,7 @@ const FlagDesc flagdesc_mapgen_carpathian[] = {
 ///////////////////////////////////////////////////////////////////////////////
 
 
-MapgenCarpathian::MapgenCarpathian(MapgenCarpathianParams *params, EmergeParams *emerge)
+MapgenCarpathian::MapgenCarpathian(MapgenCarpathianParams *params, EmergeManager *emerge)
 	: MapgenBasic(MAPGEN_CARPATHIAN, params, emerge)
 {
 	base_level       = params->base_level;
@@ -244,6 +261,12 @@ void MapgenCarpathian::makeChunk(BlockMakeData *data)
 	// Pre-conditions
 	assert(data->vmanip);
 	assert(data->nodedef);
+	assert(data->blockpos_requested.X >= data->blockpos_min.X &&
+			data->blockpos_requested.Y >= data->blockpos_min.Y &&
+			data->blockpos_requested.Z >= data->blockpos_min.Z);
+	assert(data->blockpos_requested.X <= data->blockpos_max.X &&
+			data->blockpos_requested.Y <= data->blockpos_max.Y &&
+			data->blockpos_requested.Z <= data->blockpos_max.Z);
 
 	this->generating = true;
 	this->vm = data->vmanip;
@@ -293,8 +316,7 @@ void MapgenCarpathian::makeChunk(BlockMakeData *data)
 	}
 
 	// Generate the registered ores
-	if (flags & MG_ORES)
-		m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
+	m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
 
 	// Generate dungeons
 	if (flags & MG_DUNGEONS)
@@ -328,34 +350,34 @@ int MapgenCarpathian::getSpawnLevelAtPoint(v2s16 p)
 {
 	// If rivers are enabled, first check if in a river channel
 	if (spflags & MGCARPATHIAN_RIVERS) {
-		float river = std::fabs(NoiseFractal2D(&noise_rivers->np, p.X, p.Y, seed)) -
+		float river = std::fabs(NoisePerlin2D(&noise_rivers->np, p.X, p.Y, seed)) -
 			river_width;
 		if (river < 0.0f)
 			return MAX_MAP_GENERATION_LIMIT; // Unsuitable spawn point
 	}
 
-	float height1 = NoiseFractal2D(&noise_height1->np, p.X, p.Y, seed);
-	float height2 = NoiseFractal2D(&noise_height2->np, p.X, p.Y, seed);
-	float height3 = NoiseFractal2D(&noise_height3->np, p.X, p.Y, seed);
-	float height4 = NoiseFractal2D(&noise_height4->np, p.X, p.Y, seed);
+	float height1 = NoisePerlin2D(&noise_height1->np, p.X, p.Y, seed);
+	float height2 = NoisePerlin2D(&noise_height2->np, p.X, p.Y, seed);
+	float height3 = NoisePerlin2D(&noise_height3->np, p.X, p.Y, seed);
+	float height4 = NoisePerlin2D(&noise_height4->np, p.X, p.Y, seed);
 
-	float hterabs = std::fabs(NoiseFractal2D(&noise_hills_terrain->np, p.X, p.Y, seed));
-	float n_hills = NoiseFractal2D(&noise_hills->np, p.X, p.Y, seed);
+	float hterabs = std::fabs(NoisePerlin2D(&noise_hills_terrain->np, p.X, p.Y, seed));
+	float n_hills = NoisePerlin2D(&noise_hills->np, p.X, p.Y, seed);
 	float hill_mnt = hterabs * hterabs * hterabs * n_hills * n_hills;
 
-	float rterabs = std::fabs(NoiseFractal2D(&noise_ridge_terrain->np, p.X, p.Y, seed));
-	float n_ridge_mnt = NoiseFractal2D(&noise_ridge_mnt->np, p.X, p.Y, seed);
+	float rterabs = std::fabs(NoisePerlin2D(&noise_ridge_terrain->np, p.X, p.Y, seed));
+	float n_ridge_mnt = NoisePerlin2D(&noise_ridge_mnt->np, p.X, p.Y, seed);
 	float ridge_mnt = rterabs * rterabs * rterabs * (1.0f - std::fabs(n_ridge_mnt));
 
-	float sterabs = std::fabs(NoiseFractal2D(&noise_step_terrain->np, p.X, p.Y, seed));
-	float n_step_mnt = NoiseFractal2D(&noise_step_mnt->np, p.X, p.Y, seed);
+	float sterabs = std::fabs(NoisePerlin2D(&noise_step_terrain->np, p.X, p.Y, seed));
+	float n_step_mnt = NoisePerlin2D(&noise_step_mnt->np, p.X, p.Y, seed);
 	float step_mnt = sterabs * sterabs * sterabs * getSteps(n_step_mnt);
 
 	float valley = 1.0f;
 	float river = 0.0f;
 
 	if ((spflags & MGCARPATHIAN_RIVERS) && node_max.Y >= water_level - 16) {
-		river = std::fabs(NoiseFractal2D(&noise_rivers->np, p.X, p.Y, seed)) - river_width;
+		river = std::fabs(NoisePerlin2D(&noise_rivers->np, p.X, p.Y, seed)) - river_width;
 		if (river <= valley_width) {
 			// Within river valley
 			if (river < 0.0f) {
@@ -375,7 +397,7 @@ int MapgenCarpathian::getSpawnLevelAtPoint(v2s16 p)
 	u8 cons_non_solid = 0; // consecutive non-solid nodes
 
 	for (s16 y = water_level; y <= water_level + 32; y++) {
-		float mnt_var = NoiseFractal3D(&noise_mnt_var->np, p.X, y, p.Y, seed);
+		float mnt_var = NoisePerlin3D(&noise_mnt_var->np, p.X, y, p.Y, seed);
 		float hill1 = getLerp(height1, height2, mnt_var);
 		float hill2 = getLerp(height3, height4, mnt_var);
 		float hill3 = getLerp(height3, height2, mnt_var);
@@ -428,23 +450,23 @@ int MapgenCarpathian::generateTerrain()
 	MapNode mn_water(c_water_source);
 
 	// Calculate noise for terrain generation
-	noise_height1->noiseMap2D(node_min.X, node_min.Z);
-	noise_height2->noiseMap2D(node_min.X, node_min.Z);
-	noise_height3->noiseMap2D(node_min.X, node_min.Z);
-	noise_height4->noiseMap2D(node_min.X, node_min.Z);
-	noise_hills_terrain->noiseMap2D(node_min.X, node_min.Z);
-	noise_ridge_terrain->noiseMap2D(node_min.X, node_min.Z);
-	noise_step_terrain->noiseMap2D(node_min.X, node_min.Z);
-	noise_hills->noiseMap2D(node_min.X, node_min.Z);
-	noise_ridge_mnt->noiseMap2D(node_min.X, node_min.Z);
-	noise_step_mnt->noiseMap2D(node_min.X, node_min.Z);
-	noise_mnt_var->noiseMap3D(node_min.X, node_min.Y - 1, node_min.Z);
+	noise_height1->perlinMap2D(node_min.X, node_min.Z);
+	noise_height2->perlinMap2D(node_min.X, node_min.Z);
+	noise_height3->perlinMap2D(node_min.X, node_min.Z);
+	noise_height4->perlinMap2D(node_min.X, node_min.Z);
+	noise_hills_terrain->perlinMap2D(node_min.X, node_min.Z);
+	noise_ridge_terrain->perlinMap2D(node_min.X, node_min.Z);
+	noise_step_terrain->perlinMap2D(node_min.X, node_min.Z);
+	noise_hills->perlinMap2D(node_min.X, node_min.Z);
+	noise_ridge_mnt->perlinMap2D(node_min.X, node_min.Z);
+	noise_step_mnt->perlinMap2D(node_min.X, node_min.Z);
+	noise_mnt_var->perlinMap3D(node_min.X, node_min.Y - 1, node_min.Z);
 
 	if (spflags & MGCARPATHIAN_RIVERS)
-		noise_rivers->noiseMap2D(node_min.X, node_min.Z);
+		noise_rivers->perlinMap2D(node_min.X, node_min.Z);
 
 	//// Place nodes
-	const v3s32 &em = vm->m_area.getExtent();
+	const v3s16 &em = vm->m_area.getExtent();
 	s16 stone_surface_max_y = -MAX_MAP_GENERATION_LIMIT;
 	u32 index2d = 0;
 

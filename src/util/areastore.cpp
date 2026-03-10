@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2015 est31 <mtest31@outlook.com>
+/*
+Minetest
+Copyright (C) 2015 est31 <mtest31@outlook.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "util/areastore.h"
 #include "util/serialize.h"
@@ -54,7 +69,7 @@ void AreaStore::serialize(std::ostream &os) const
 	// After 5.1.0-dev:  version >= 5 throws SerializationError
 	// Forwards-compatibility is assumed before version 5.
 
-	writeU8(os, 0); // Serialization version
+	writeU8(os, 0); // Serialisation version
 
 	// TODO: Compression?
 	writeU16(os, areas_map.size());
@@ -81,15 +96,16 @@ void AreaStore::deserialize(std::istream &is)
 
 	u16 num_areas = readU16(is);
 	std::vector<Area> areas;
-	areas.reserve(num_areas);
 	for (u32 i = 0; i < num_areas; ++i) {
 		Area a(U32_MAX);
 		a.minedge = readV3S16(is);
 		a.maxedge = readV3S16(is);
 		u16 data_len = readU16(is);
-		a.data = std::string(data_len, '\0');
-		is.read(&a.data[0], data_len);
-		areas.emplace_back(std::move(a));
+		char *data = new char[data_len];
+		is.read(data, data_len);
+		a.data = std::string(data, data_len);
+		areas.emplace_back(a);
+		delete [] data;
 	}
 
 	bool read_ids = is.good(); // EOF for old formats
@@ -178,7 +194,8 @@ bool VectorAreaStore::insertArea(Area *a)
 {
 	if (a->id == U32_MAX)
 		a->id = getNextId();
-	auto res = areas_map.emplace(a->id, *a);
+	std::pair<AreaMap::iterator, bool> res =
+			areas_map.insert(std::make_pair(a->id, *a));
 	if (!res.second)
 		// ID is not unique
 		return false;
@@ -193,7 +210,7 @@ bool VectorAreaStore::removeArea(u32 id)
 	if (it == areas_map.end())
 		return false;
 	Area *a = &it->second;
-	for (auto v_it = m_areas.begin();
+	for (std::vector<Area *>::iterator v_it = m_areas.begin();
 			v_it != m_areas.end(); ++v_it) {
 		if (*v_it == a) {
 			m_areas.erase(v_it);
@@ -248,7 +265,7 @@ bool SpatialAreaStore::insertArea(Area *a)
 {
 	if (a->id == U32_MAX)
 		a->id = getNextId();
-	if (!areas_map.emplace(a->id, *a).second)
+	if (!areas_map.insert(std::make_pair(a->id, *a)).second)
 		// ID is not unique
 		return false;
 	m_tree->insertData(0, nullptr, get_spatial_region(a->minedge, a->maxedge), a->id);
@@ -258,7 +275,7 @@ bool SpatialAreaStore::insertArea(Area *a)
 
 bool SpatialAreaStore::removeArea(u32 id)
 {
-	auto itr = areas_map.find(id);
+	std::map<u32, Area>::iterator itr = areas_map.find(id);
 	if (itr != areas_map.end()) {
 		Area *a = &itr->second;
 		bool result = m_tree->deleteData(get_spatial_region(a->minedge,
@@ -292,7 +309,6 @@ void SpatialAreaStore::getAreasInArea(std::vector<Area *> *result,
 SpatialAreaStore::~SpatialAreaStore()
 {
 	delete m_tree;
-	delete m_storagemanager;
 }
 
 SpatialAreaStore::SpatialAreaStore()

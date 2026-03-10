@@ -1,82 +1,41 @@
-ARG DOCKER_IMAGE=alpine:3.19
-FROM $DOCKER_IMAGE AS dev
+FROM debian:stretch
 
-ENV LUAJIT_VERSION v2.1
+USER root
+RUN apt-get update -y && \
+	apt-get -y install build-essential libirrlicht-dev cmake libbz2-dev libpng-dev libjpeg-dev \
+		libsqlite3-dev libcurl4-gnutls-dev zlib1g-dev libgmp-dev libjsoncpp-dev git
 
-RUN apk add --no-cache git build-base cmake curl-dev zlib-dev zstd-dev \
-		sqlite-dev postgresql-dev hiredis-dev leveldb-dev \
-		gmp-dev jsoncpp-dev ninja ca-certificates
+COPY . /usr/src/minetest
 
-WORKDIR /usr/src/
-RUN git clone --recursive https://github.com/jupp0r/prometheus-cpp && \
-		cd prometheus-cpp && \
-		cmake -B build \
-			-DCMAKE_INSTALL_PREFIX=/usr/local \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DENABLE_TESTING=0 \
-			-GNinja && \
-		cmake --build build && \
-		cmake --install build && \
-	cd /usr/src/ && \
-	git clone --recursive https://github.com/libspatialindex/libspatialindex && \
-		cd libspatialindex && \
-		cmake -B build \
-			-DCMAKE_INSTALL_PREFIX=/usr/local && \
-		cmake --build build && \
-		cmake --install build && \
-	cd /usr/src/ && \
-	git clone --recursive https://luajit.org/git/luajit.git -b ${LUAJIT_VERSION} && \
-		cd luajit && \
-		make amalg && make install && \
-	cd /usr/src/
-
-FROM dev as builder
-
-COPY .git /usr/src/luanti/.git
-COPY CMakeLists.txt /usr/src/luanti/CMakeLists.txt
-COPY README.md /usr/src/luanti/README.md
-COPY minetest.conf.example /usr/src/luanti/minetest.conf.example
-COPY builtin /usr/src/luanti/builtin
-COPY cmake /usr/src/luanti/cmake
-COPY doc /usr/src/luanti/doc
-COPY fonts /usr/src/luanti/fonts
-COPY lib /usr/src/luanti/lib
-COPY misc /usr/src/luanti/misc
-COPY po /usr/src/luanti/po
-COPY src /usr/src/luanti/src
-COPY irr /usr/src/luanti/irr
-COPY textures /usr/src/luanti/textures
-
-WORKDIR /usr/src/luanti
-RUN cmake -B build \
-		-DCMAKE_INSTALL_PREFIX=/usr/local \
-		-DCMAKE_BUILD_TYPE=Release \
+RUN	mkdir -p /usr/src/minetest/cmakebuild && cd /usr/src/minetest/cmakebuild && \
+    	cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release -DRUN_IN_PLACE=FALSE \
 		-DBUILD_SERVER=TRUE \
-		-DENABLE_PROMETHEUS=TRUE \
-		-DBUILD_UNITTESTS=FALSE -DBUILD_BENCHMARKS=FALSE \
 		-DBUILD_CLIENT=FALSE \
-		-GNinja && \
-	cmake --build build && \
-	cmake --install build
+		-DENABLE_SYSTEM_JSONCPP=1 \
+		.. && \
+		make -j2 && \
+		rm -Rf ../games/minetest_game && git clone --depth 1 https://github.com/minetest/minetest_game ../games/minetest_game && \
+		rm -Rf ../games/minetest_game/.git && \
+		make install
 
-FROM $DOCKER_IMAGE AS runtime
+FROM debian:stretch
 
-RUN apk add --no-cache curl gmp libstdc++ libgcc libpq jsoncpp zstd-libs \
-				sqlite-libs postgresql hiredis leveldb && \
-	adduser -D minetest --uid 30000 -h /var/lib/minetest && \
-	chown -R minetest:minetest /var/lib/minetest
+USER root
+RUN groupadd minetest && useradd -m -g minetest -d /var/lib/minetest minetest && \
+    apt-get update -y && \
+    apt-get -y install libcurl3-gnutls libjsoncpp1 liblua5.1-0 libluajit-5.1-2 libpq5 libsqlite3-0 \
+        libstdc++6 zlib1g libc6 && \
+    apt-get clean && rm -rf /var/cache/apt/archives/* && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/lib/minetest
 
-COPY --from=builder /usr/local/share/luanti /usr/local/share/luanti
-COPY --from=builder /usr/local/bin/luantiserver /usr/local/bin/luantiserver
-COPY --from=builder /usr/local/share/doc/luanti/minetest.conf.example /etc/minetest/minetest.conf
-COPY --from=builder /usr/local/lib/libspatialindex* /usr/local/lib/
-COPY --from=builder /usr/local/lib/libluajit* /usr/local/lib/
-USER minetest:minetest
+COPY --from=0 /usr/local/share/minetest /usr/local/share/minetest
+COPY --from=0 /usr/local/bin/minetestserver /usr/local/bin/minetestserver
+COPY --from=0 /usr/local/share/doc/minetest/minetest.conf.example /etc/minetest/minetest.conf
 
-EXPOSE 30000/udp 30000/tcp
-VOLUME /var/lib/minetest/ /etc/minetest/
+USER minetest
 
-ENTRYPOINT ["/usr/local/bin/luantiserver"]
-CMD ["--config", "/etc/minetest/minetest.conf"]
+EXPOSE 30000/udp
+
+CMD ["/usr/local/bin/minetestserver", "--config", "/etc/minetest/minetest.conf"]

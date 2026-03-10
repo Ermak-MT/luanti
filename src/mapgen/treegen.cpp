@@ -1,47 +1,37 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2018 celeron55, Perttu Ahola <celeron55@gmail.com>,
-// Copyright (C) 2012-2018 RealBadAngel, Maciej Kasatkin
-// Copyright (C) 2015-2018 paramat
+/*
+Minetest
+Copyright (C) 2010-2018 celeron55, Perttu Ahola <celeron55@gmail.com>,
+Copyright (C) 2012-2018 RealBadAngel, Maciej Kasatkin
+Copyright (C) 2015-2018 paramat
 
-#include <stack>
-#include "treegen.h"
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
+
 #include "irr_v3d.h"
+#include <stack>
 #include "util/pointer.h"
 #include "util/numeric.h"
-#include "servermap.h"
+#include "map.h"
 #include "mapblock.h"
-#include "noise.h"
+#include "serverenvironment.h"
+#include "nodedef.h"
+#include "treegen.h"
 #include "voxelalgorithms.h"
 
 namespace treegen
 {
-
-void TreeDef::resolveNodeNames()
-{
-	getIdFromNrBacklog(&trunknode.param0, "", CONTENT_IGNORE);
-	getIdFromNrBacklog(&leavesnode.param0, "", CONTENT_IGNORE);
-	if (leaves2_chance)
-		getIdFromNrBacklog(&leaves2node.param0, "", CONTENT_IGNORE);
-	getIdFromNrBacklog(&fruitnode.param0, "", CONTENT_IGNORE);
-}
-
-/*
-	L-System tree gen helper functions
-
-	NOTE: the PseudoRandom parameters here were probably accidentally used
-	as by-value instead of by-reference. But don't change this now to keep
-	the old behaviour.
-*/
-static void tree_trunk_placement(MMVManip &vmanip, v3f p0, const TreeDef &def);
-static void tree_leaves_placement(MMVManip &vmanip, v3f p0,
-	PseudoRandom ps, const TreeDef &def);
-static void tree_single_leaves_placement(MMVManip &vmanip, v3f p0,
-	PseudoRandom ps, const TreeDef &def);
-static void tree_fruit_placement(MMVManip &vmanip, v3f p0, const TreeDef &def);
-
-static void setRotationAxisRadians(core::matrix4 &M, float angle, v3f axis);
-static v3f transposeMatrix(const core::matrix4 &M, v3f v);
 
 void make_tree(MMVManip &vmanip, v3s16 p0, bool is_apple_tree,
 	const NodeDefManager *ndef, s32 seed)
@@ -54,12 +44,6 @@ void make_tree(MMVManip &vmanip, v3s16 p0, bool is_apple_tree,
 	MapNode treenode(ndef->getId("mapgen_tree"));
 	MapNode leavesnode(ndef->getId("mapgen_leaves"));
 	MapNode applenode(ndef->getId("mapgen_apple"));
-	if (treenode == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_tree' is invalid!" << std::endl;
-	if (leavesnode == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_leaves' is invalid!" << std::endl;
-	if (applenode == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_apple' is invalid!" << std::endl;
 
 	PseudoRandom pr(seed);
 	s16 trunk_h = pr.range(4, 5);
@@ -77,7 +61,7 @@ void make_tree(MMVManip &vmanip, v3s16 p0, bool is_apple_tree,
 
 	VoxelArea leaves_a(v3s16(-2, -1, -2), v3s16(2, 2, 2));
 	Buffer<u8> leaves_d(leaves_a.getVolume());
-	for (u32 i = 0; i < leaves_d.getSize(); i++)
+	for (s32 i = 0; i < leaves_a.getVolume(); i++)
 		leaves_d[i] = 0;
 
 	// Force leaves at near the end of the trunk
@@ -129,32 +113,38 @@ void make_tree(MMVManip &vmanip, v3s16 p0, bool is_apple_tree,
 }
 
 
-treegen::error spawn_ltree(ServerMap *map, v3s16 p0,
-	const TreeDef &tree_definition)
+// L-System tree LUA spawner
+treegen::error spawn_ltree(ServerEnvironment *env, v3s16 p0,
+	const NodeDefManager *ndef, const TreeDef &tree_definition)
 {
+	ServerMap *map = &env->getServerMap();
+	std::map<v3s16, MapBlock*> modified_blocks;
 	MMVManip vmanip(map);
 	v3s16 tree_blockp = getNodeBlockPos(p0);
+	treegen::error e;
 
 	vmanip.initialEmerge(tree_blockp - v3s16(1, 1, 1), tree_blockp + v3s16(1, 3, 1));
-	treegen::error e = make_ltree(vmanip, p0, tree_definition);
+	e = make_ltree(vmanip, p0, ndef, tree_definition);
 	if (e != SUCCESS)
 		return e;
 
-	std::map<v3s16, MapBlock*> modified_blocks;
 	voxalgo::blit_back_with_light(map, &vmanip, &modified_blocks);
 
 	// Send a MEET_OTHER event
 	MapEditEvent event;
 	event.type = MEET_OTHER;
-	event.setModifiedBlocks(modified_blocks);
+	for (auto &modified_block : modified_blocks)
+		event.modified_blocks.insert(modified_block.first);
 	map->dispatchEvent(event);
 	return SUCCESS;
 }
 
 
+//L-System tree generator
 treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
-	const TreeDef &tree_definition)
+	const NodeDefManager *ndef, TreeDef tree_definition)
 {
+	MapNode dirtnode(ndef->getId("mapgen_dirt"));
 	s32 seed;
 	if (tree_definition.explicit_seed)
 		seed = tree_definition.seed + 14002;
@@ -163,10 +153,10 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 	PseudoRandom ps(seed);
 
 	// chance of inserting abcd rules
-	constexpr float prop_a = 9;
-	constexpr float prop_b = 8;
-	constexpr float prop_c = 7;
-	constexpr float prop_d = 6;
+	double prop_a = 9;
+	double prop_b = 8;
+	double prop_c = 7;
+	double prop_d = 6;
 
 	//randomize tree growth level, minimum=2
 	s16 iterations = tree_definition.iterations;
@@ -175,13 +165,13 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 	if (iterations < 2)
 		iterations = 2;
 
-	constexpr s16 MAX_ANGLE_OFFSET = 5;
-	float angle_in_radians = tree_definition.angle * M_PI / 180;
-	float angleOffset_in_radians = (s16)(ps.range(0, 1) % MAX_ANGLE_OFFSET) * M_PI / 180;
+	s16 MAX_ANGLE_OFFSET = 5;
+	double angle_in_radians = (double)tree_definition.angle * M_PI / 180;
+	double angleOffset_in_radians = (s16)(ps.range(0, 1) % MAX_ANGLE_OFFSET) * M_PI / 180;
 
 	//initialize rotation matrix, position and stacks for branches
 	core::matrix4 rotation;
-	setRotationAxisRadians(rotation, M_PI / 2, v3f(0, 0, 1));
+	rotation = setRotationAxisRadians(rotation, M_PI / 2, v3f(0, 0, 1));
 	v3f position;
 	position.X = p0.X;
 	position.Y = p0.Y;
@@ -232,43 +222,43 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 		axiom = temp;
 	}
 
-	// Add trunk nodes below a wide trunk to avoid gaps when tree is on sloping ground
+	//make sure tree is not floating in the air
 	if (tree_definition.trunk_type == "double") {
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X + 1, position.Y - 1, position.Z),
-			tree_definition
+			dirtnode
 		);
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X, position.Y - 1, position.Z + 1),
-			tree_definition
+			dirtnode
 		);
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X + 1, position.Y - 1, position.Z + 1),
-			tree_definition
+			dirtnode
 		);
 	} else if (tree_definition.trunk_type == "crossed") {
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X + 1, position.Y - 1, position.Z),
-			tree_definition
+			dirtnode
 		);
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X - 1, position.Y - 1, position.Z),
-			tree_definition
+			dirtnode
 		);
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X, position.Y - 1, position.Z + 1),
-			tree_definition
+			dirtnode
 		);
-		tree_trunk_placement(
+		tree_node_placement(
 			vmanip,
 			v3f(position.X, position.Y - 1, position.Z - 1),
-			tree_definition
+			dirtnode
 		);
 	}
 
@@ -276,29 +266,29 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 
 	Key for Special L-System Symbols used in Axioms
 
-	  G  - move forward one unit with the pen up
-	  F  - move forward one unit with the pen down drawing trunks and branches
-	  f  - move forward one unit with the pen down drawing leaves (100% chance)
-	  T  - move forward one unit with the pen down drawing trunks only
-	  R  - move forward one unit with the pen down placing fruit
-	  A  - replace with rules set A
-	  B  - replace with rules set B
-	  C  - replace with rules set C
-	  D  - replace with rules set D
-	  a  - replace with rules set A, chance 90%
-	  b  - replace with rules set B, chance 80%
-	  c  - replace with rules set C, chance 70%
-	  d  - replace with rules set D, chance 60%
-	  +  - yaw the turtle right by angle degrees
-	  -  - yaw the turtle left by angle degrees
-	  &  - pitch the turtle down by angle degrees
-	  ^  - pitch the turtle up by angle degrees
-	  /  - roll the turtle to the right by angle degrees
-	  *  - roll the turtle to the left by angle degrees
-	  [  - save in stack current state info
-	  ]  - recover from stack state info
+    G  - move forward one unit with the pen up
+    F  - move forward one unit with the pen down drawing trunks and branches
+    f  - move forward one unit with the pen down drawing leaves (100% chance)
+    T  - move forward one unit with the pen down drawing trunks only
+    R  - move forward one unit with the pen down placing fruit
+    A  - replace with rules set A
+    B  - replace with rules set B
+    C  - replace with rules set C
+    D  - replace with rules set D
+    a  - replace with rules set A, chance 90%
+    b  - replace with rules set B, chance 80%
+    c  - replace with rules set C, chance 70%
+    d  - replace with rules set D, chance 60%
+    +  - yaw the turtle right by angle degrees
+    -  - yaw the turtle left by angle degrees
+    &  - pitch the turtle down by angle degrees
+    ^  - pitch the turtle up by angle degrees
+    /  - roll the turtle to the right by angle degrees
+    *  - roll the turtle to the left by angle degrees
+    [  - save in stack current state info
+    ]  - recover from stack state info
 
-	 */
+    */
 
 	s16 x,y,z;
 	for (s16 i = 0; i < (s16)axiom.size(); i++) {
@@ -375,7 +365,7 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 					!tree_definition.thin_branches)) {
 				tree_trunk_placement(
 					vmanip,
-					v3f(position.X + 1, position.Y, position.Z),
+					v3f(position.X +1 , position.Y, position.Z),
 					tree_definition
 				);
 				tree_trunk_placement(
@@ -413,8 +403,7 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 					v3f(position.X, position.Y, position.Z - 1),
 					tree_definition
 				);
-			}
-			if (!stack_orientation.empty()) {
+			} if (!stack_orientation.empty()) {
 				s16 size = 1;
 				for (x = -size; x <= size; x++)
 				for (y = -size; y <= size; y++)
@@ -492,37 +481,37 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 			break;
 		case '+':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians + angleOffset_in_radians, v3f(0, 0, 1));
 			rotation *= temp_rotation;
 			break;
 		case '-':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians + angleOffset_in_radians, v3f(0, 0, -1));
 			rotation *= temp_rotation;
 			break;
 		case '&':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians + angleOffset_in_radians, v3f(0, 1, 0));
 			rotation *= temp_rotation;
 			break;
 		case '^':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians + angleOffset_in_radians, v3f(0, -1, 0));
 			rotation *= temp_rotation;
 			break;
 		case '*':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians, v3f(1, 0, 0));
 			rotation *= temp_rotation;
 			break;
 		case '/':
 			temp_rotation.makeIdentity();
-			setRotationAxisRadians(temp_rotation,
+			temp_rotation = setRotationAxisRadians(temp_rotation,
 					angle_in_radians, v3f(-1, 0, 0));
 			rotation *= temp_rotation;
 			break;
@@ -535,7 +524,20 @@ treegen::error make_ltree(MMVManip &vmanip, v3s16 p0,
 }
 
 
-void tree_trunk_placement(MMVManip &vmanip, v3f p0, const TreeDef &tree_definition)
+void tree_node_placement(MMVManip &vmanip, v3f p0, MapNode node)
+{
+	v3s16 p1 = v3s16(myround(p0.X), myround(p0.Y), myround(p0.Z));
+	if (!vmanip.m_area.contains(p1))
+		return;
+	u32 vi = vmanip.m_area.index(p1);
+	if (vmanip.m_data[vi].getContent() != CONTENT_AIR
+			&& vmanip.m_data[vi].getContent() != CONTENT_IGNORE)
+		return;
+	vmanip.m_data[vmanip.m_area.index(p1)] = node;
+}
+
+
+void tree_trunk_placement(MMVManip &vmanip, v3f p0, TreeDef &tree_definition)
 {
 	v3s16 p1 = v3s16(myround(p0.X), myround(p0.Y), myround(p0.Z));
 	if (!vmanip.m_area.contains(p1))
@@ -552,7 +554,7 @@ void tree_trunk_placement(MMVManip &vmanip, v3f p0, const TreeDef &tree_definiti
 
 
 void tree_leaves_placement(MMVManip &vmanip, v3f p0,
-		PseudoRandom ps, const TreeDef &tree_definition)
+		PseudoRandom ps, TreeDef &tree_definition)
 {
 	MapNode leavesnode = tree_definition.leavesnode;
 	if (ps.range(1, 100) > 100 - tree_definition.leaves2_chance)
@@ -576,7 +578,7 @@ void tree_leaves_placement(MMVManip &vmanip, v3f p0,
 
 
 void tree_single_leaves_placement(MMVManip &vmanip, v3f p0,
-		PseudoRandom ps, const TreeDef &tree_definition)
+		PseudoRandom ps, TreeDef &tree_definition)
 {
 	MapNode leavesnode = tree_definition.leavesnode;
 	if (ps.range(1, 100) > 100 - tree_definition.leaves2_chance)
@@ -592,7 +594,7 @@ void tree_single_leaves_placement(MMVManip &vmanip, v3f p0,
 }
 
 
-void tree_fruit_placement(MMVManip &vmanip, v3f p0, const TreeDef &tree_definition)
+void tree_fruit_placement(MMVManip &vmanip, v3f p0, TreeDef &tree_definition)
 {
 	v3s16 p1 = v3s16(myround(p0.X), myround(p0.Y), myround(p0.Z));
 	if (!vmanip.m_area.contains(p1))
@@ -605,18 +607,18 @@ void tree_fruit_placement(MMVManip &vmanip, v3f p0, const TreeDef &tree_definiti
 }
 
 
-void setRotationAxisRadians(core::matrix4 &M, float angle, v3f axis)
+irr::core::matrix4 setRotationAxisRadians(irr::core::matrix4 M, double angle, v3f axis)
 {
-	float c = std::cos(angle);
-	float s = std::sin(angle);
-	float t = 1.0f - c;
+	double c = cos(angle);
+	double s = sin(angle);
+	double t = 1.0 - c;
 
-	float tx  = t * axis.X;
-	float ty  = t * axis.Y;
-	float tz  = t * axis.Z;
-	float sx  = s * axis.X;
-	float sy  = s * axis.Y;
-	float sz  = s * axis.Z;
+	double tx  = t * axis.X;
+	double ty  = t * axis.Y;
+	double tz  = t * axis.Z;
+	double sx  = s * axis.X;
+	double sy  = s * axis.Y;
+	double sz  = s * axis.Z;
 
 	M[0] = tx * axis.X + c;
 	M[1] = tx * axis.Y + sz;
@@ -629,15 +631,19 @@ void setRotationAxisRadians(core::matrix4 &M, float angle, v3f axis)
 	M[8]  = tz * axis.X + sy;
 	M[9]  = tz * axis.Y - sx;
 	M[10] = tz * axis.Z + c;
+	return M;
 }
 
 
-v3f transposeMatrix(const core::matrix4 &M, v3f v)
+v3f transposeMatrix(irr::core::matrix4 M, v3f v)
 {
 	v3f translated;
-	translated.X = M[0] * v.X + M[4] * v.Y + M[8]  * v.Z + M[12];
-	translated.Y = M[1] * v.X + M[5] * v.Y + M[9]  * v.Z + M[13];
-	translated.Z = M[2] * v.X + M[6] * v.Y + M[10] * v.Z + M[14];
+	double x = M[0] * v.X + M[4] * v.Y + M[8]  * v.Z +M[12];
+	double y = M[1] * v.X + M[5] * v.Y + M[9]  * v.Z +M[13];
+	double z = M[2] * v.X + M[6] * v.Y + M[10] * v.Z +M[14];
+	translated.X = x;
+	translated.Y = y;
+	translated.Z = z;
 	return translated;
 }
 
@@ -656,10 +662,6 @@ void make_jungletree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 		c_tree = ndef->getId("mapgen_tree");
 	if (c_leaves == CONTENT_IGNORE)
 		c_leaves = ndef->getId("mapgen_leaves");
-	if (c_tree == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_jungletree' is invalid!" << std::endl;
-	if (c_leaves == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_jungleleaves' is invalid!" << std::endl;
 
 	MapNode treenode(c_tree);
 	MapNode leavesnode(c_leaves);
@@ -697,8 +699,9 @@ void make_jungletree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 	p1.Y -= 1;
 
 	VoxelArea leaves_a(v3s16(-3, -2, -3), v3s16(3, 2, 3));
+	//SharedPtr<u8> leaves_d(new u8[leaves_a.getVolume()]);
 	Buffer<u8> leaves_d(leaves_a.getVolume());
-	for (u32 i = 0; i < leaves_d.getSize(); i++)
+	for (s32 i = 0; i < leaves_a.getVolume(); i++)
 		leaves_d[i] = 0;
 
 	// Force leaves at near the end of the trunk
@@ -762,10 +765,6 @@ void make_pine_tree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 		c_leaves = ndef->getId("mapgen_leaves");
 	if (c_snow == CONTENT_IGNORE)
 		c_snow = CONTENT_AIR;
-	if (c_tree == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_pine_tree' is invalid!" << std::endl;
-	if (c_leaves == CONTENT_IGNORE)
-		errorstream << "Treegen: Mapgen alias 'mapgen_pine_needles' is invalid!" << std::endl;
 
 	MapNode treenode(c_tree);
 	MapNode leavesnode(c_leaves);
@@ -787,7 +786,7 @@ void make_pine_tree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 
 	VoxelArea leaves_a(v3s16(-3, -6, -3), v3s16(3, 3, 3));
 	Buffer<u8> leaves_d(leaves_a.getVolume());
-	for (u32 i = 0; i < leaves_d.getSize(); i++)
+	for (s32 i = 0; i < leaves_a.getVolume(); i++)
 		leaves_d[i] = 0;
 
 	// Upper branches
@@ -808,7 +807,7 @@ void make_pine_tree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 		dev--;
 	}
 
-	// Center top nodes
+	// Centre top nodes
 	leaves_d[leaves_a.index(v3s16(0, 1, 0))] = 1;
 	leaves_d[leaves_a.index(v3s16(0, 2, 0))] = 1;
 	leaves_d[leaves_a.index(v3s16(0, 3, 0))] = 2;
@@ -872,17 +871,6 @@ void make_pine_tree(MMVManip &vmanip, v3s16 p0, const NodeDefManager *ndef,
 			i++;
 		}
 	}
-}
-
-std::string error_to_string(error e)
-{
-	switch (e) {
-		case SUCCESS:
-			return "success";
-		case UNBALANCED_BRACKETS:
-			return "closing ']' has no matching opening bracket";
-	}
-	return "unknown error";
 }
 
 }; // namespace treegen

@@ -18,19 +18,20 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #pragma once
 
+#include "irrlichttypes_extrabloated.h"
 #include "modalMenu.h"
 #include <string>
 
 class Client;
-class ISimpleTextureSource;
 
 class GUIPasswordChange : public GUIModalMenu
 {
 public:
 	GUIPasswordChange(gui::IGUIEnvironment *env, gui::IGUIElement *parent, s32 id,
-			IMenuManager *menumgr, Client *client,
-			ISimpleTextureSource *tsrc);
+			IMenuManager *menumgr, Client *client);
+	~GUIPasswordChange();
 
+	void removeChildren();
 	/*
 		Remove and re-add (or reposition) stuff
 	*/
@@ -44,7 +45,7 @@ public:
 
 	bool OnEvent(const SEvent &event);
 #ifdef __ANDROID__
-	void getAndroidUIInput();
+	bool getAndroidUIInput();
 #endif
 
 protected:
@@ -56,5 +57,4 @@ private:
 	std::wstring m_oldpass = L"";
 	std::wstring m_newpass = L"";
 	std::wstring m_newpass_confirm = L"";
-	ISimpleTextureSource *m_tsrc;
 };

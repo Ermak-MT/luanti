@@ -1,56 +1,54 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include "irrlichttypes.h"
-#include "inventory.h" // ItemStack
-#include "util/basic_macros.h"
-#include "util/numeric.h"
-#include <plane3d.h>
-#include <array>
-#include <vector>
-#include <optional>
+#include "irrlichttypes_extrabloated.h"
+#include "inventory.h"
+#include "client/tile.h"
+#include <ICameraSceneNode.h>
+#include <ISceneNode.h>
+#include <list>
 
 class LocalPlayer;
 struct MapDrawControl;
 class Client;
-class RenderingEngine;
 class WieldMeshSceneNode;
 
-enum CameraMode : int;
-
-namespace scene {
-	class ICameraSceneNode;
-	class ISceneManager;
-	class ISceneNode;
-};
-
-struct Nametag
-{
-	scene::ISceneNode *parent_node = nullptr;
-	std::string text;
-	video::SColor textcolor;
-	std::optional<video::SColor> bgcolor;
-	std::optional<u32> textsize;
-	v3f pos; // offset from parent node
-	bool scale_z;
-
-	video::SColor getBgColor(bool use_fallback) const
+struct Nametag {
+	Nametag(scene::ISceneNode *a_parent_node,
+			const std::string &a_nametag_text,
+			const video::SColor &a_nametag_color,
+			const v3f &a_nametag_pos):
+		parent_node(a_parent_node),
+		nametag_text(a_nametag_text),
+		nametag_color(a_nametag_color),
+		nametag_pos(a_nametag_pos)
 	{
-		if (bgcolor.has_value())
-			return bgcolor.value();
-		else if (!use_fallback)
-			return video::SColor(0, 0, 0, 0);
-		else if (textcolor.getBrightness() > 186)
-			// Dark background for light text
-			return video::SColor(50, 50, 50, 50);
-		else
-			// Light background for dark text
-			return video::SColor(50, 255, 255, 255);
 	}
+	scene::ISceneNode *parent_node;
+	std::string nametag_text;
+	video::SColor nametag_color;
+	v3f nametag_pos;
 };
+
+enum CameraMode {CAMERA_MODE_FIRST, CAMERA_MODE_THIRD, CAMERA_MODE_THIRD_FRONT};
 
 /*
 	Client camera class, manages the player and camera scene nodes, the viewing distance
@@ -60,11 +58,8 @@ struct Nametag
 class Camera
 {
 public:
-	Camera(MapDrawControl &draw_control, Client *client, RenderingEngine *rendering_engine);
+	Camera(MapDrawControl &draw_control, Client *client);
 	~Camera();
-
-	static void settingChangedCallback(const std::string &name, void *data);
-	void readSettings();
 
 	// Get camera scene node.
 	// It has the eye transformation, pitch and view bobbing applied.
@@ -79,9 +74,6 @@ public:
 	{
 		return m_camera_position;
 	}
-
-	// Returns the absolute position of the head SceneNode in the world
-	v3f getHeadPosition() const;
 
 	// Get the camera direction (in absolute camera coordinates).
 	// This has view bobbing applied.
@@ -114,34 +106,16 @@ public:
 		return MYMAX(m_fov_x, m_fov_y);
 	}
 
-	// Returns a lambda that when called with an object's position and bounding-sphere
-	// radius (both in BS space) returns true if, and only if the object should be
-	// frustum-culled.
-	auto getFrustumCuller() const
-	{
-		return [planes = getFrustumCullPlanes(),
-				camera_offset = intToFloat(m_camera_offset, BS)
-				](v3f position, f32 radius) {
-			v3f pos_camspace = position - camera_offset;
-			for (auto &plane : planes) {
-				if (plane.getDistanceTo(pos_camspace) > radius)
-					return true;
-			}
-			return false;
-		};
-	}
-
-	// Notify about new server-sent FOV and initialize smooth FOV transition
-	void notifyFovChange();
+	// Checks if the constructor was able to create the scene nodes
+	bool successfullyCreated(std::string &error_message);
 
 	// Step the camera: updates the viewing range and view bobbing.
 	void step(f32 dtime);
 
 	// Update the camera from the local player's position.
-	void update(LocalPlayer* player, f32 frametime, f32 tool_reload_ratio);
-
-	// Adjust the camera offset when needed
-	void updateOffset();
+	// busytime is used to adjust the viewing range.
+	void update(LocalPlayer* player, f32 frametime, f32 busytime,
+			f32 tool_reload_ratio);
 
 	// Update render distance
 	void updateViewingRange();
@@ -156,10 +130,17 @@ public:
 	// Draw the wielded tool.
 	// This has to happen *after* the main scene is drawn.
 	// Warning: This clears the Z buffer.
-	void drawWieldedTool(core::matrix4* translation=NULL);
+	void drawWieldedTool(irr::core::matrix4* translation=NULL);
 
 	// Toggle the current camera mode
-	void toggleCameraMode();
+	void toggleCameraMode() {
+		if (m_camera_mode == CAMERA_MODE_FIRST)
+			m_camera_mode = CAMERA_MODE_THIRD;
+		else if (m_camera_mode == CAMERA_MODE_THIRD)
+			m_camera_mode = CAMERA_MODE_THIRD_FRONT;
+		else
+			m_camera_mode = CAMERA_MODE_FIRST;
+	}
 
 	// Set the current camera mode
 	inline void setCameraMode(CameraMode mode)
@@ -168,24 +149,24 @@ public:
 	}
 
 	//read the current camera mode
-	inline CameraMode getCameraMode() const
+	inline CameraMode getCameraMode()
 	{
 		return m_camera_mode;
 	}
 
-	Nametag *addNametag(const Nametag &params);
+	Nametag *addNametag(scene::ISceneNode *parent_node,
+		const std::string &nametag_text, video::SColor nametag_color,
+		const v3f &pos);
 
 	void removeNametag(Nametag *nametag);
+
+	const std::list<Nametag *> &getNametags() { return m_nametags; }
 
 	void drawNametags();
 
 	inline void addArmInertia(f32 player_yaw);
 
 private:
-	// Use getFrustumCuller().
-	// This helper just exists to decrease the header's number of includes.
-	std::array<core::plane3d<f32>, 4> getFrustumCullPlanes() const;
-
 	// Nodes
 	scene::ISceneNode *m_playernode = nullptr;
 	scene::ISceneNode *m_headnode = nullptr;
@@ -199,25 +180,12 @@ private:
 
 	Client *m_client;
 
-	// Default Client FOV (as defined by the "fov" setting)
-	f32 m_cache_fov;
-
 	// Absolute camera position
 	v3f m_camera_position;
 	// Absolute camera direction
 	v3f m_camera_direction;
 	// Camera offset
 	v3s16 m_camera_offset;
-
-	bool m_stepheight_smooth_active = false;
-
-	// Server-sent FOV variables
-	bool m_server_sent_fov = false;
-	f32 m_curr_fov_degrees, m_target_fov_degrees;
-
-	// FOV transition variables
-	bool m_fov_transition_active = false;
-	f32 m_fov_diff, m_transition_time;
 
 	v2f m_wieldmesh_offset = v2f(55.0f, -35.0f);
 	v2f m_arm_dir;
@@ -238,6 +206,8 @@ private:
 	s32 m_view_bobbing_state = 0;
 	// Speed of view bobbing animation
 	f32 m_view_bobbing_speed = 0.0f;
+	// Fall view bobbing
+	f32 m_view_bobbing_fall = 0.0f;
 
 	// Digging animation frame (0 <= m_digging_anim < 1)
 	f32 m_digging_anim = 0.0f;
@@ -250,14 +220,12 @@ private:
 	f32 m_wield_change_timer = 0.125f;
 	ItemStack m_wield_item_next;
 
-	CameraMode m_camera_mode;
+	CameraMode m_camera_mode = CAMERA_MODE_FIRST;
 
+	f32 m_cache_fall_bobbing_amount;
 	f32 m_cache_view_bobbing_amount;
+	f32 m_cache_fov;
 	bool m_arm_inertia;
 
-	std::vector<Nametag*> m_nametags;
-	bool m_show_nametag_backgrounds;
-
-	// Last known light color of the player
-	video::SColor m_player_light_color;
+	std::list<Nametag *> m_nametags;
 };

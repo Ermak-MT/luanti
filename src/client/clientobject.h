@@ -1,12 +1,26 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include "irrlichttypes_bloated.h"
+#include "irrlichttypes_extrabloated.h"
 #include "activeobject.h"
-#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -14,14 +28,10 @@
 class ClientEnvironment;
 class ITextureSource;
 class Client;
+class IGameDef;
+class LocalPlayer;
 struct ItemStack;
-
-namespace scene
-{
-	class AnimatedMeshSceneNode;
-	class ISceneNode;
-	class ISceneManager;
-}
+class WieldMeshSceneNode;
 
 class ClientActiveObject : public ActiveObject
 {
@@ -29,25 +39,25 @@ public:
 	ClientActiveObject(u16 id, Client *client, ClientEnvironment *env);
 	virtual ~ClientActiveObject();
 
-	virtual void addToScene(ITextureSource *tsrc, scene::ISceneManager *smgr) = 0;
+	virtual void addToScene(ITextureSource *tsrc) {}
 	virtual void removeFromScene(bool permanent) {}
-
-	virtual void updateLight(u32 day_night_ratio) {}
-
+	// 0 <= light_at_pos <= LIGHT_SUN
+	virtual void updateLight(u8 light_at_pos) {}
+	virtual void updateLightNoCheck(u8 light_at_pos) {}
+	virtual v3s16 getLightPosition() { return v3s16(0, 0, 0); }
 	virtual bool getCollisionBox(aabb3f *toset) const { return false; }
 	virtual bool getSelectionBox(aabb3f *toset) const { return false; }
 	virtual bool collideWithObjects() const { return false; }
-	virtual const v3f getPosition() const { return v3f(0.0f); } // in BS-space
-	virtual const v3f getVelocity() const { return v3f(0.0f); } // in BS-space
+	virtual const v3f getPosition() const { return v3f(0.0f); }
 	virtual scene::ISceneNode *getSceneNode() const
 	{ return NULL; }
-	virtual scene::AnimatedMeshSceneNode *getAnimatedMeshSceneNode() const
+	virtual scene::IAnimatedMeshSceneNode *getAnimatedMeshSceneNode() const
 	{ return NULL; }
 	virtual bool isLocalPlayer() const { return false; }
 
 	virtual ClientActiveObject *getParent() const { return nullptr; };
-	virtual const std::unordered_set<object_t> &getAttachmentChildIds() const
-	{ static std::unordered_set<object_t> rv; return rv; }
+	virtual const std::unordered_set<int> &getAttachmentChildIds() const
+	{ static std::unordered_set<int> rv; return rv; }
 	virtual void updateAttachments() {};
 
 	virtual bool doShowSelectionBox() { return true; }
@@ -68,16 +78,16 @@ public:
 	virtual void initialize(const std::string &data) {}
 
 	// Create a certain type of ClientActiveObject
-	static std::unique_ptr<ClientActiveObject> create(ActiveObjectType type,
-			Client *client, ClientEnvironment *env);
+	static ClientActiveObject *create(ActiveObjectType type, Client *client,
+		ClientEnvironment *env);
 
 	// If returns true, punch will not be sent to the server
-	virtual bool directReportPunch(v3f dir, const ItemStack *punchitem,
-		const ItemStack *hand_item, float time_from_last_punch = 1000000) { return false; }
+	virtual bool directReportPunch(v3f dir, const ItemStack *punchitem = nullptr,
+		float time_from_last_punch = 1000000) { return false; }
 
 protected:
 	// Used for creating objects based on type
-	typedef std::unique_ptr<ClientActiveObject> (*Factory)(Client *client, ClientEnvironment *env);
+	typedef ClientActiveObject *(*Factory)(Client *client, ClientEnvironment *env);
 	static void registerType(u16 type, Factory f);
 	Client *m_client;
 	ClientEnvironment *m_env;

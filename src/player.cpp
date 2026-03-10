@@ -1,32 +1,38 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "player.h"
 
-#include <cmath>
-#include "hud_element.h"
+#include "threading/mutex_auto_lock.h"
+#include "util/numeric.h"
+#include "hud.h"
 #include "constants.h"
 #include "gamedef.h"
-#include <tuple>
+#include "settings.h"
+#include "log.h"
+#include "porting.h"  // strlcpy
 
-const struct EnumString es_CameraMode[] = {
-	{CAMERA_MODE_ANY, "any"},
-	{CAMERA_MODE_FIRST, "first"},
-	{CAMERA_MODE_THIRD, "third"},
-	{CAMERA_MODE_THIRD_FRONT, "third_front"},
-	{0, nullptr}
-};
 
-bool is_valid_player_name(std::string_view name)
-{
-	return !name.empty() && name.size() <= PLAYERNAME_SIZE && string_allowed(name, PLAYERNAME_ALLOWED_CHARS);
-}
-
-Player::Player(const std::string &name, IItemDefManager *idef):
+Player::Player(const char *name, IItemDefManager *idef):
 	inventory(idef)
 {
-	m_name = name;
+	strlcpy(m_name, name, PLAYERNAME_SIZE);
 
 	inventory.clear();
 	inventory.addList("main", PLAYER_INVENTORY_SIZE);
@@ -64,14 +70,23 @@ Player::Player(const std::string &name, IItemDefManager *idef):
 		HUD_FLAG_HOTBAR_VISIBLE    | HUD_FLAG_HEALTHBAR_VISIBLE |
 		HUD_FLAG_CROSSHAIR_VISIBLE | HUD_FLAG_WIELDITEM_VISIBLE |
 		HUD_FLAG_BREATHBAR_VISIBLE | HUD_FLAG_MINIMAP_VISIBLE   |
-		HUD_FLAG_MINIMAP_RADAR_VISIBLE | HUD_FLAG_BASIC_DEBUG   |
-		HUD_FLAG_CHAT_VISIBLE;
+		HUD_FLAG_MINIMAP_RADAR_VISIBLE;
 
 	hud_hotbar_itemcount = HUD_HOTBAR_ITEMCOUNT_DEFAULT;
+
+	m_player_settings.readGlobalSettings();
+	// Register player setting callbacks
+	for (const std::string &name : m_player_settings.setting_names)
+		g_settings->registerChangedCallback(name,
+			&Player::settingsChangedCallback, &m_player_settings);
 }
 
 Player::~Player()
 {
+	// m_player_settings becomes invalid, remove callbacks
+	for (const std::string &name : m_player_settings.setting_names)
+		g_settings->deregisterChangedCallback(name,
+			&Player::settingsChangedCallback, &m_player_settings);
 	clearHud();
 }
 
@@ -79,11 +94,6 @@ void Player::setWieldIndex(u16 index)
 {
 	const InventoryList *mlist = inventory.getList("main");
 	m_wield_index = MYMIN(index, mlist ? mlist->getSize() : 0);
-}
-
-u16 Player::getWieldIndex()
-{
-	return std::min(m_wield_index, getMaxHotbarItemcount());
 }
 
 ItemStack &Player::getWieldedItem(ItemStack *selected, ItemStack *hand) const
@@ -105,6 +115,8 @@ ItemStack &Player::getWieldedItem(ItemStack *selected, ItemStack *hand) const
 
 u32 Player::addHud(HudElement *toadd)
 {
+	MutexAutoLock lock(m_mutex);
+
 	u32 id = getFreeHudID();
 
 	if (id < hud.size())
@@ -117,146 +129,49 @@ u32 Player::addHud(HudElement *toadd)
 
 HudElement* Player::getHud(u32 id)
 {
+	MutexAutoLock lock(m_mutex);
+
 	if (id < hud.size())
 		return hud[id];
-	return nullptr;
+
+	return NULL;
 }
 
 HudElement* Player::removeHud(u32 id)
 {
-	HudElement* retval = nullptr;
+	MutexAutoLock lock(m_mutex);
+
+	HudElement* retval = NULL;
 	if (id < hud.size()) {
 		retval = hud[id];
-		hud[id] = nullptr;
+		hud[id] = NULL;
 	}
-	// shrink list if possible
-	while (!hud.empty() && hud.back() == nullptr)
-		hud.pop_back();
 	return retval;
 }
 
 void Player::clearHud()
 {
-	while (!hud.empty()) {
+	MutexAutoLock lock(m_mutex);
+
+	while(!hud.empty()) {
 		delete hud.back();
 		hud.pop_back();
 	}
 }
 
-u16 Player::getMaxHotbarItemcount()
+void PlayerSettings::readGlobalSettings()
 {
-	InventoryList *mainlist = inventory.getList("main");
-	return mainlist ? std::min(mainlist->getSize(), (u32) hud_hotbar_itemcount) : 0;
+	free_move = g_settings->getBool("free_move");
+	pitch_move = g_settings->getBool("pitch_move");
+	fast_move = g_settings->getBool("fast_move");
+	continuous_forward = g_settings->getBool("continuous_forward");
+	always_fly_fast = g_settings->getBool("always_fly_fast");
+	aux1_descends = g_settings->getBool("aux1_descends");
+	noclip = g_settings->getBool("noclip");
+	autojump = g_settings->getBool("autojump");
 }
 
-void PlayerControl::setMovementFromKeys()
+void Player::settingsChangedCallback(const std::string &name, void *data)
 {
-	bool a_up = direction_keys & (1 << 0),
-		a_down = direction_keys & (1 << 1),
-		a_left = direction_keys & (1 << 2),
-		a_right = direction_keys & (1 << 3);
-
-	if (a_up || a_down || a_left || a_right)  {
-		// if contradictory keys pressed, stay still
-		if (a_up && a_down && a_left && a_right)
-			movement_speed = 0.0f;
-		else if (a_up && a_down && !a_left && !a_right)
-			movement_speed = 0.0f;
-		else if (!a_up && !a_down && a_left && a_right)
-			movement_speed = 0.0f;
-		else
-			// If there is a keyboard event, assume maximum speed
-			movement_speed = 1.0f;
-	}
-
-	// Check keyboard for input
-	float x = 0, y = 0;
-	if (a_up)
-		y += 1;
-	if (a_down)
-		y -= 1;
-	if (a_left)
-		x -= 1;
-	if (a_right)
-		x += 1;
-
-	if (x != 0 || y != 0)
-		// If there is a keyboard event, it takes priority
-		movement_direction = std::atan2(x, y);
-}
-
-u32 PlayerControl::getKeysPressed() const
-{
-	u32 keypress_bits =
-		( (u32)(jump  & 1) << 4) |
-		( (u32)(aux1  & 1) << 5) |
-		( (u32)(sneak & 1) << 6) |
-		( (u32)(dig   & 1) << 7) |
-		( (u32)(place & 1) << 8) |
-		( (u32)(zoom  & 1) << 9)
-	;
-
-	// If any direction keys are pressed pass those through
-	if (direction_keys != 0)
-	{
-		keypress_bits |= direction_keys;
-	}
-	// Otherwise set direction keys based on joystick movement (for mod compatibility)
-	else if (isMoving())
-	{
-		float abs_d;
-
-		// (absolute value indicates forward / backward)
-		abs_d = std::abs(movement_direction);
-		if (abs_d < 3.0f / 8.0f * M_PI)
-			keypress_bits |= (u32)1; // Forward
-		if (abs_d > 5.0f / 8.0f * M_PI)
-			keypress_bits |= (u32)1 << 1; // Backward
-
-		// rotate entire coordinate system by 90 degree
-		abs_d = movement_direction + M_PI_2;
-		if (abs_d >= M_PI)
-			abs_d -= 2 * M_PI;
-		abs_d = std::abs(abs_d);
-		// (value now indicates left / right)
-		if (abs_d < 3.0f / 8.0f * M_PI)
-			keypress_bits |= (u32)1 << 2; // Left
-		if (abs_d > 5.0f / 8.0f * M_PI)
-			keypress_bits |= (u32)1 << 3; // Right
-	}
-
-	return keypress_bits;
-}
-
-
-void PlayerControl::unpackKeysPressed(u32 keypress_bits)
-{
-	direction_keys = keypress_bits & 0xf;
-	jump  = keypress_bits & (1 << 4);
-	aux1  = keypress_bits & (1 << 5);
-	sneak = keypress_bits & (1 << 6);
-	dig   = keypress_bits & (1 << 7);
-	place = keypress_bits & (1 << 8);
-	zoom  = keypress_bits & (1 << 9);
-}
-
-v2f PlayerControl::getMovement() const
-{
-	return v2f(std::sin(movement_direction), std::cos(movement_direction)) * movement_speed;
-}
-
-static auto tie(const PlayerPhysicsOverride &o)
-{
-	// Make sure to add new members to this list!
-	return std::tie(
-	o.speed, o.jump, o.gravity, o.sneak, o.sneak_glitch, o.new_move, o.speed_climb,
-	o.speed_crouch, o.liquid_fluidity, o.liquid_fluidity_smooth, o.liquid_sink,
-	o.acceleration_default, o.acceleration_air, o.speed_fast, o.acceleration_fast,
-	o.speed_walk
-	);
-}
-
-bool PlayerPhysicsOverride::operator==(const PlayerPhysicsOverride &other) const
-{
-	return tie(*this) == tie(other);
+	((PlayerSettings *)data)->readGlobalSettings();
 }

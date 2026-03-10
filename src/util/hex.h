@@ -1,32 +1,49 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 Jonathan Neuschäfer <j.neuschaefer@gmx.net>
+/*
+Minetest
+Copyright (C) 2013 Jonathan Neuschäfer <j.neuschaefer@gmx.net>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #include <string>
-#include <string_view>
 
 static const char hex_chars[] = "0123456789abcdef";
 
-[[nodiscard]]
-static inline std::string hex_encode(std::string_view data)
+static inline std::string hex_encode(const char *data, unsigned int data_size)
 {
 	std::string ret;
-	ret.reserve(data.size() * 2);
-	for (unsigned char c : data) {
-		ret.push_back(hex_chars[(c & 0xf0) >> 4]);
-		ret.push_back(hex_chars[c & 0x0f]);
+	ret.reserve(data_size * 2);
+
+	char buf2[3];
+	buf2[2] = '\0';
+
+	for (unsigned int i = 0; i < data_size; i++) {
+		unsigned char c = (unsigned char)data[i];
+		buf2[0] = hex_chars[(c & 0xf0) >> 4];
+		buf2[1] = hex_chars[c & 0x0f];
+		ret.append(buf2);
 	}
+
 	return ret;
 }
 
-[[nodiscard]]
-static inline std::string hex_encode(const char *data, size_t data_size)
+static inline std::string hex_encode(const std::string &data)
 {
-	if (!data_size)
-		return "";
-	return hex_encode(std::string_view(data, data_size));
+	return hex_encode(data.c_str(), data.size());
 }
 
 static inline bool hex_digit_decode(char hexdigit, unsigned char &value)

@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 
 #include "porting.h"
@@ -17,8 +32,6 @@
 
 #ifdef _MSC_VER
 	#include <dbghelp.h>
-	#include <windows.h>
-	#include <eh.h>
 	#include "version.h"
 	#include "filesys.h"
 #endif
@@ -39,7 +52,7 @@ void sanity_check_fn(const char *assertion, const char *file,
 #endif
 
 	errorstream << std::endl << "In thread " << std::hex
-		<< std::this_thread::get_id() << ":\n" << std::dec;
+		<< std::this_thread::get_id() << ":" << std::endl;
 	errorstream << file << ":" << line << ": " << function
 		<< ": An engine assumption '" << assertion << "' failed." << std::endl;
 
@@ -54,18 +67,11 @@ void fatal_error_fn(const char *msg, const char *file,
 #endif
 
 	errorstream << std::endl << "In thread " << std::hex
-		<< std::this_thread::get_id() << ":\n" << std::dec;
+		<< std::this_thread::get_id() << ":" << std::endl;
 	errorstream << file << ":" << line << ": " << function
 		<< ": A fatal error occurred: " << msg << std::endl;
 
 	abort();
-}
-
-std::string debug_describe_exc(const std::exception &e)
-{
-	if (dynamic_cast<const std::bad_alloc*>(&e))
-		return "C++ out of memory";
-	return std::string("\"").append(e.what()).append("\"");
 }
 
 #ifdef _MSC_VER

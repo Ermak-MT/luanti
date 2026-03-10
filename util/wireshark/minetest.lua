@@ -1,46 +1,40 @@
 -- minetest.lua
--- Packet dissector for the UDP-based Luanti protocol
+-- Packet dissector for the UDP-based Minetest protocol
 -- Copy this to $HOME/.wireshark/plugins/
 
--- Luanti
--- SPDX-License-Identifier: LGPL-2.1-or-later
+
+--
+-- Minetest
 -- Copyright (C) 2011 celeron55, Perttu Ahola <celeron55@gmail.com>
-
-
--- Wireshark documentation:
--- https://www.wireshark.org/docs/wsdg_html_chunked/lua_module_Proto.html
--- https://www.wireshark.org/docs/wsdg_html_chunked/lua_module_Tree.html
--- https://www.wireshark.org/docs/wsdg_html_chunked/lua_module_Tvb.html
+--
+-- This program is free software; you can redistribute it and/or modify
+-- it under the terms of the GNU General Public License as published by
+-- the Free Software Foundation; either version 2 of the License, or
+-- (at your option) any later version.
+--
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU General Public License for more details.
+--
+-- You should have received a copy of the GNU General Public License along
+-- with this program; if not, write to the Free Software Foundation, Inc.,
+-- 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+--
 
 
 -- Table of Contents:
---   Part 1: Utility functions
---   Part 2: Client command dissectors (TOSERVER_*)
---   Part 3: Server command dissectors (TOCLIENT_*)
---   Part 4: Wrapper protocol subdissectors
---   Part 5: Wrapper protocol main dissector
---   Part 6: Utility functions part 2
+--   Part 1: Client command dissectors (TOSERVER_*)
+--   Part 2: Server command dissectors (TOCLIENT_*)
+--   Part 3: Wrapper protocol subdissectors
+--   Part 4: Wrapper protocol main dissector
+--   Part 5: Utility functions
 
 
------------------------
--- Part 1            --
--- Utility functions --
------------------------
-
--- Creates two ProtoFields to hold a length and variable-length text content
--- lentype must be either "uint16" or "uint32"
-function minetest_field_helper(lentype, name, abbr)
-	local f_textlen = ProtoField[lentype](name .. "len", abbr .. " (length)", base.DEC)
-	local f_text = ProtoField.string(name, abbr)
-	return f_textlen, f_text
-end
-
--- global reference to 'minetest.peer' field (set later)
-local minetest_peer_field
 
 
 --------------------------------------------
--- Part 2                                 --
+-- Part 1                                 --
 -- Client command dissectors (TOSERVER_*) --
 --------------------------------------------
 
@@ -48,71 +42,34 @@ minetest_client_commands = {}
 minetest_client_obsolete = {}
 
 -- TOSERVER_INIT
+minetest_client_commands[0x02] = { "INIT", 2 }
 
 do
-	local abbr = "minetest.client.init_"
-
-	local f_ser_fmt = ProtoField.uint8(abbr.."ser_version",
+	local f_ser_fmt = ProtoField.uint8("minetest.client.init_ser_version",
 		"Maximum serialization format version", base.DEC)
-	local f_comp_modes = ProtoField.uint16(abbr.."compression",
-		"Supported compression modes", base.DEC, { [0] = "No compression" })
-	local f_proto_min = ProtoField.uint16(abbr.."proto_min", "Minimum protocol version", base.DEC)
-	local f_proto_max = ProtoField.uint16(abbr.."_proto_max", "Maximum protocol version", base.DEC)
-	local f_player_namelen, f_player_name =
-		minetest_field_helper("uint16", abbr.."player_name", "Player Name")
+	local f_player_name = ProtoField.stringz("minetest.client.init_player_name", "Player Name")
+	local f_password = ProtoField.stringz("minetest.client.init_password", "Password")
+	local f_version = ProtoField.uint16("minetest.client.init_version", "Version", base.DEC)
 
-	minetest_client_commands[0x02] = {
-		"INIT",                            -- Command name
-		11,                                -- Minimum message length including code
-		{ f_ser_fmt,                       -- List of fields [optional]
-		  f_comp_modes,
-		  f_proto_min,
-		  f_proto_max,
-		  f_player_namelen,
-		  f_player_name },
-		function(buffer, pinfo, tree, t)   -- Dissector function [optional]
+	minetest_client_commands[0x10] = {
+		"INIT_LEGACY",                      -- Command name
+		53,                                 -- Minimum message length including code
+		{ f_ser_fmt,                        -- List of fields [optional]
+		  f_player_name,
+		  f_password,
+		  f_version },
+		function(buffer, pinfo, tree, t)    -- Dissector function [optional]
 			t:add(f_ser_fmt, buffer(2,1))
-			t:add(f_comp_modes, buffer(3,2))
-			t:add(f_proto_min, buffer(5,2))
-			t:add(f_proto_max, buffer(7,2))
-			minetest_decode_helper_ascii(buffer, t, "uint16", 9, f_player_namelen, f_player_name)
+			t:add(f_player_name, buffer(3,20))
+			t:add(f_password, buffer(23,28))
+			t:add(f_version, buffer(51,2))
 		end
 	}
 end
-
--- TOSERVER_INIT_LEGACY (obsolete)
-
-minetest_client_commands[0x10] = { "INIT_LEGACY", 2 }
-minetest_client_obsolete[0x10] = true
 
 -- TOSERVER_INIT2
 
-do
-	local f_langlen, f_lang =
-		minetest_field_helper("uint16", "minetest.client.init2_language", "Language Code")
-
-	minetest_client_commands[0x11] = {
-		"INIT2",
-		2,
-		{ f_langlen,
-		  f_lang },
-		function(buffer, pinfo, tree, t)
-			minetest_decode_helper_ascii(buffer, t, "uint16", 2, f_langlen, f_lang)
-		end
-	}
-end
-
--- TOSERVER_MODCHANNEL_JOIN
-
-minetest_client_commands[0x17] = { "MODCHANNEL_JOIN", 2 }
-
--- TOSERVER_MODCHANNEL_LEAVE
-
-minetest_client_commands[0x18] = { "MODCHANNEL_LEAVE", 2 }
-
--- TOSERVER_MODCHANNEL_MSG
-
-minetest_client_commands[0x19] = { "MODCHANNEL_MSG", 2 }
+minetest_client_commands[0x11] = { "INIT2", 2 }
 
 -- TOSERVER_GETBLOCK (obsolete)
 
@@ -132,24 +89,18 @@ minetest_client_obsolete[0x22] = true
 -- TOSERVER_PLAYERPOS
 
 do
-	local abbr = "minetest.client.playerpos_"
-
-	local f_x = ProtoField.int32(abbr.."x", "Position X", base.DEC)
-	local f_y = ProtoField.int32(abbr.."y", "Position Y", base.DEC)
-	local f_z = ProtoField.int32(abbr.."z", "Position Z", base.DEC)
-	local f_speed_x = ProtoField.int32(abbr.."speed_x", "Speed X", base.DEC)
-	local f_speed_y = ProtoField.int32(abbr.."speed_y", "Speed Y", base.DEC)
-	local f_speed_z = ProtoField.int32(abbr.."speed_z", "Speed Z", base.DEC)
-	local f_pitch = ProtoField.int32(abbr.."pitch", "Pitch", base.DEC)
-	local f_yaw = ProtoField.int32(abbr.."yaw", "Yaw", base.DEC)
-	local f_key_pressed = ProtoField.bytes(abbr.."key_pressed", "Pressed keys")
-	local f_fov = ProtoField.uint8(abbr.."fov", "FOV", base.DEC)
-	local f_wanted_range = ProtoField.uint8(abbr.."wanted_range", "Requested view range", base.DEC)
+	local f_x = ProtoField.int32("minetest.client.playerpos_x", "Position X", base.DEC)
+	local f_y = ProtoField.int32("minetest.client.playerpos_y", "Position Y", base.DEC)
+	local f_z = ProtoField.int32("minetest.client.playerpos_z", "Position Z", base.DEC)
+	local f_speed_x = ProtoField.int32("minetest.client.playerpos_speed_x", "Speed X", base.DEC)
+	local f_speed_y = ProtoField.int32("minetest.client.playerpos_speed_y", "Speed Y", base.DEC)
+	local f_speed_z = ProtoField.int32("minetest.client.playerpos_speed_z", "Speed Z", base.DEC)
+	local f_pitch = ProtoField.int32("minetest.client.playerpos_pitch", "Pitch", base.DEC)
+	local f_yaw = ProtoField.int32("minetest.client.playerpos_yaw", "Yaw", base.DEC)
 
 	minetest_client_commands[0x23] = {
 		"PLAYERPOS", 34,
-		{ f_x, f_y, f_z, f_speed_x, f_speed_y, f_speed_z, f_pitch, f_yaw,
-		  f_key_pressed, f_fov, f_wanted_range },
+		{ f_x, f_y, f_z, f_speed_x, f_speed_y, f_speed_z, f_pitch, f_yaw },
 		function(buffer, pinfo, tree, t)
 			t:add(f_x, buffer(2,4))
 			t:add(f_y, buffer(6,4))
@@ -159,9 +110,6 @@ do
 			t:add(f_speed_z, buffer(22,4))
 			t:add(f_pitch, buffer(26,4))
 			t:add(f_yaw, buffer(30,4))
-			t:add(f_key_pressed, buffer(34,4))
-			t:add(f_fov, buffer(38,1))
-			t:add(f_wanted_range, buffer(39,1))
 		end
 	}
 end
@@ -200,6 +148,7 @@ do
 end
 
 -- TOSERVER_DELETEDBLOCKS
+-- TODO: Test this
 
 do
 	local f_count = ProtoField.uint8("minetest.client.deletedblocks_count", "Count", base.DEC)
@@ -237,25 +186,122 @@ end
 minetest_client_commands[0x26] = { "ADDNODE_FROM_INVENTORY", 2 }
 minetest_client_obsolete[0x26] = true
 
--- TOSERVER_CLICK_OBJECT (obsolete)
+-- TOSERVER_CLICK_OBJECT
+-- TODO: Test this
 
-minetest_client_commands[0x27] = { "CLICK_OBJECT", 2 }
-minetest_client_obsolete[0x27] = true
+do
+	local vs_button = {
+		[0] = "left",
+		[1] = "right"
+	}
 
--- TOSERVER_GROUND_ACTION (obsolete)
+	local f_button = ProtoField.uint8("minetest.client.click_object_button", "Button", base.DEC, vs_button)
+	local f_blockpos_x = ProtoField.int16("minetest.client.click_object_blockpos_x", "Block position X", base.DEC)
+	local f_blockpos_y = ProtoField.int16("minetest.client.click_object_blockpos_y", "Block position Y", base.DEC)
+	local f_blockpos_z = ProtoField.int16("minetest.client.click_object_blockpos_z", "Block position Z", base.DEC)
+	local f_id = ProtoField.int16("minetest.client.click_object_id", "ID", base.DEC)
+	local f_item = ProtoField.uint16("minetest.client.click_object_item", "Item", base.DEC)
 
-minetest_client_commands[0x28] = { "GROUND_ACTION", 2 }
-minetest_client_obsolete[0x28] = true
+	minetest_client_commands[0x27] = {
+		"CLICK_OBJECT", 13,
+		{ f_button, f_blockpos_x, f_blockpos_y, f_blockpos_z, f_id, f_item },
+		function(buffer, pinfo, tree, t)
+			t:add(f_button, buffer(2,1))
+			t:add(f_blockpos_x, buffer(3,2))
+			t:add(f_blockpos_y, buffer(5,2))
+			t:add(f_blockpos_z, buffer(7,2))
+			t:add(f_id, buffer(9,2))
+			t:add(f_item, buffer(11,2))
+		end
+	}
+end
+
+-- TOSERVER_GROUND_ACTION
+
+do
+	local vs_action = {
+		[0] = "Start digging",
+		[1] = "Place block",
+		[2] = "Stop digging",
+		[3] = "Digging completed"
+	}
+
+	local f_action = ProtoField.uint8("minetest.client.ground_action", "Action", base.DEC, vs_action)
+	local f_nodepos_undersurface_x = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_undersurface_x",
+		"Node position (under surface) X")
+	local f_nodepos_undersurface_y = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_undersurface_y",
+		"Node position (under surface) Y")
+	local f_nodepos_undersurface_z = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_undersurface_z",
+		"Node position (under surface) Z")
+	local f_nodepos_abovesurface_x = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_abovesurface_x",
+		"Node position (above surface) X")
+	local f_nodepos_abovesurface_y = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_abovesurface_y",
+		"Node position (above surface) Y")
+	local f_nodepos_abovesurface_z = ProtoField.int16(
+		"minetest.client.ground_action_nodepos_abovesurface_z",
+		"Node position (above surface) Z")
+	local f_item = ProtoField.uint16("minetest.client.ground_action_item", "Item")
+
+	minetest_client_commands[0x28] = {
+		"GROUND_ACTION", 17,
+		{ f_action,
+		  f_nodepos_undersurface_x,
+		  f_nodepos_undersurface_y,
+		  f_nodepos_undersurface_z,
+		  f_nodepos_abovesurface_x,
+		  f_nodepos_abovesurface_y,
+		  f_nodepos_abovesurface_z,
+		  f_item },
+		function(buffer, pinfo, tree, t)
+			t:add(f_action, buffer(2,1))
+			t:add(f_nodepos_undersurface_x, buffer(3,2))
+			t:add(f_nodepos_undersurface_y, buffer(5,2))
+			t:add(f_nodepos_undersurface_z, buffer(7,2))
+			t:add(f_nodepos_abovesurface_x, buffer(9,2))
+			t:add(f_nodepos_abovesurface_y, buffer(11,2))
+			t:add(f_nodepos_abovesurface_z, buffer(13,2))
+			t:add(f_item, buffer(15,2))
+		end
+	}
+end
 
 -- TOSERVER_RELEASE (obsolete)
 
 minetest_client_commands[0x29] = { "RELEASE", 2 }
 minetest_client_obsolete[0x29] = true
 
--- TOSERVER_SIGNTEXT (obsolete)
+-- TOSERVER_SIGNTEXT (old signs)
+-- TODO: Test this or mark obsolete
 
-minetest_client_commands[0x30] = { "SIGNTEXT", 2 }
-minetest_client_obsolete[0x30] = true
+do
+	local f_blockpos_x = ProtoField.int16("minetest.client.signtext_blockpos_x", "Block position X", base.DEC)
+	local f_blockpos_y = ProtoField.int16("minetest.client.signtext_blockpos_y", "Block position Y", base.DEC)
+	local f_blockpos_z = ProtoField.int16("minetest.client.signtext_blockpos_z", "Block position Z", base.DEC)
+	local f_id = ProtoField.int16("minetest.client.signtext_id", "ID", base.DEC)
+	local f_textlen = ProtoField.uint16("minetest.client.signtext_textlen", "Text length", base.DEC)
+	local f_text = ProtoField.string("minetest.client.signtext_text", "Text")
+
+	minetest_client_commands[0x30] = {
+		"SIGNTEXT", 12,
+		{ f_blockpos_x, f_blockpos_y, f_blockpos_z, f_id, f_textlen, f_text },
+		function(buffer, pinfo, tree, t)
+			t:add(f_blockpos_x, buffer(2,2))
+			t:add(f_blockpos_y, buffer(4,2))
+			t:add(f_blockpos_z, buffer(6,2))
+			t:add(f_id, buffer(8,2))
+			t:add(f_textlen, buffer(10,2))
+			local textlen = buffer(10,2):uint()
+			if minetest_check_length(buffer, 12 + textlen, t) then
+				t:add(f_text, buffer, buffer(12,textlen))
+			end
+		end
+	}
+end
 
 -- TOSERVER_INVENTORY_ACTION
 
@@ -284,22 +330,59 @@ do
 			t:add(f_length, buffer(2,2))
 			local textlen = buffer(2,2):uint()
 			if minetest_check_length(buffer, 4 + textlen*2, t) then
-				t:add(f_message, buffer(4, textlen*2), buffer(4, textlen*2):ustring())
+				t:add(f_message, minetest_convert_utf16(buffer(4, textlen*2), "Converted chat message"))
 			end
 		end
 	}
 end
 
--- TOSERVER_SIGNNODETEXT (obsolete)
+-- TOSERVER_SIGNNODETEXT
 
-minetest_client_commands[0x33] = { "SIGNNODETEXT", 2 }
-minetest_client_obsolete[0x33] = true
+do
+	local f_pos_x = ProtoField.int16("minetest.client.signnodetext_pos_x", "Block position X", base.DEC)
+	local f_pos_y = ProtoField.int16("minetest.client.signnodetext_pos_y", "Block position Y", base.DEC)
+	local f_pos_z = ProtoField.int16("minetest.client.signnodetext_pos_z", "Block position Z", base.DEC)
+	local f_textlen = ProtoField.uint16("minetest.client.signnodetext_textlen", "Text length", base.DEC)
+	local f_text = ProtoField.string("minetest.client.signnodetext_text", "Text")
 
+	minetest_client_commands[0x33] = {
+		"SIGNNODETEXT", 10,
+		{ f_pos_x, f_pos_y, f_pos_z, f_textlen, f_text },
+		function(buffer, pinfo, tree, t)
+			t:add(f_pos_x, buffer(2,2))
+			t:add(f_pos_y, buffer(4,2))
+			t:add(f_pos_z, buffer(6,2))
+			t:add(f_textlen, buffer(8,2))
+			local textlen = buffer(8,2):uint()
+			if minetest_check_length(buffer, 10 + textlen, t) then
+				t:add(f_text, buffer(10, textlen))
+			end
+		end
+	}
+end
 
--- TOSERVER_CLICK_ACTIVEOBJECT (obsolete)
+-- TOSERVER_CLICK_ACTIVEOBJECT
 
-minetest_client_commands[0x34] = { "CLICK_ACTIVEOBJECT", 2 }
-minetest_client_obsolete[0x34] = true
+do
+	local vs_button = {
+		[0] = "left",
+		[1] = "right"
+	}
+
+	local f_button = ProtoField.uint8("minetest.client.click_activeobject_button", "Button", base.DEC, vs_button)
+	local f_id = ProtoField.uint16("minetest.client.click_activeobject_id", "ID", base.DEC)
+	local f_item = ProtoField.uint16("minetest.client.click_activeobject_item", "Item", base.DEC)
+
+	minetest_client_commands[0x34] = {
+		"CLICK_ACTIVEOBJECT", 7,
+		{ f_button, f_id, f_item },
+		function(buffer, pinfo, tree, t)
+			t:add(f_button, buffer(2,1))
+			t:add(f_id, buffer(3,2))
+			t:add(f_item, buffer(5,2))
+		end
+	}
+end
 
 -- TOSERVER_DAMAGE
 
@@ -315,10 +398,21 @@ do
 	}
 end
 
--- TOSERVER_PASSWORD (obsolete)
+-- TOSERVER_PASSWORD
 
-minetest_client_commands[0x36] = { "PASSWORD", 2 }
-minetest_client_obsolete[0x36] = true
+do
+	local f_old_password = ProtoField.string("minetest.client.password_old", "Old password")
+	local f_new_password = ProtoField.string("minetest.client.password_new", "New password")
+
+	minetest_client_commands[0x36] = {
+		"PASSWORD", 58,
+		{ f_old_password, f_new_password },
+		function(buffer, pinfo, tree, t)
+			t:add(f_old_password, buffer(2,28))
+			t:add(f_new_password, buffer(30,28))
+		end
+	}
+end
 
 -- TOSERVER_PLAYERITEM
 
@@ -334,220 +428,58 @@ do
 	}
 end
 
--- TOSERVER_RESPAWN_LEGACY
+-- TOSERVER_RESPAWN
+minetest_client_commands[0x38] = { "RESPAWN", 2 }
 
-minetest_client_commands[0x38] = { "RESPAWN_LEGACY", 2 }
-
--- TOSERVER_INTERACT
-
-do
-	local abbr = "minetest.client.interact_"
-	local vs_action = {
-		[0] = "Start digging",
-		[1] = "Stop digging",
-		[2] = "Digging completed",
-		[3] = "Place block or item",
-		[4] = "Use item",
-		[5] = "Activate held item",
-	}
-	local vs_pointed_type = {
-		[0] = "Nothing",
-		[1] = "Node",
-		[2] = "Object",
-	}
-
-	local f_action = ProtoField.uint8(abbr.."action", "Action", base.DEC, vs_action)
-	local f_item = ProtoField.uint16(abbr.."item", "Item Index", base.DEC)
-	local f_plen = ProtoField.uint32(abbr.."plen", "Length of pointed thing", base.DEC)
-	local f_pointed_version = ProtoField.uint8(abbr.."pointed_version",
-		"Pointed Thing Version", base.DEC)
-	local f_pointed_type = ProtoField.uint8(abbr.."pointed_version",
-		"Pointed Thing Type", base.DEC, vs_pointed_type)
-	local f_pointed_under_x = ProtoField.int16(abbr.."pointed_under_x",
-		"Node position (under surface) X")
-	local f_pointed_under_y = ProtoField.int16(abbr.."pointed_under_y",
-		"Node position (under surface) Y")
-	local f_pointed_under_z = ProtoField.int16(abbr.."pointed_under_z",
-		"Node position (under surface) Z")
-	local f_pointed_above_x = ProtoField.int16(abbr.."pointed_above_x",
-		"Node position (above surface) X")
-	local f_pointed_above_y = ProtoField.int16(abbr.."pointed_above_y",
-		"Node position (above surface) Y")
-	local f_pointed_above_z = ProtoField.int16(abbr.."pointed_above_z",
-		"Node position (above surface) Z")
-	local f_pointed_object_id = ProtoField.int16(abbr.."pointed_object_id",
-		"Object ID")
-	-- mising: additional playerpos data just like in TOSERVER_PLAYERPOS
-
-	minetest_client_commands[0x39] = {
-		"INTERACT", 11,
-		{ f_action,
-		  f_item,
-		  f_plen,
-		  f_pointed_version,
-		  f_pointed_type,
-		  f_pointed_under_x,
-		  f_pointed_under_y,
-		  f_pointed_under_z,
-		  f_pointed_above_x,
-		  f_pointed_above_y,
-		  f_pointed_above_z,
-		  f_pointed_object_id },
-		function(buffer, pinfo, tree, t)
-			t:add(f_action, buffer(2,1))
-			t:add(f_item, buffer(3,2))
-			t:add(f_plen, buffer(5,4))
-			local plen = buffer(5,4):uint()
-			if minetest_check_length(buffer, 9 + plen, t) then
-				t:add(f_pointed_version, buffer(9,1))
-				t:add(f_pointed_type, buffer(10,1))
-				local ptype = buffer(10,1):uint()
-				if ptype == 1 then -- Node
-					t:add(f_pointed_under_x, buffer(11,2))
-					t:add(f_pointed_under_y, buffer(13,2))
-					t:add(f_pointed_under_z, buffer(15,2))
-					t:add(f_pointed_above_x, buffer(17,2))
-					t:add(f_pointed_above_y, buffer(19,2))
-					t:add(f_pointed_above_z, buffer(21,2))
-				elseif ptype == 2 then -- Object
-					t:add(f_pointed_object_id, buffer(11,2))
-				end
-			end
-		end
-	}
-end
-
--- ...
-
+minetest_client_commands[0x39] = { "INTERACT", 2 }
 minetest_client_commands[0x3a] = { "REMOVED_SOUNDS", 2 }
 minetest_client_commands[0x3b] = { "NODEMETA_FIELDS", 2 }
 minetest_client_commands[0x3c] = { "INVENTORY_FIELDS", 2 }
 minetest_client_commands[0x40] = { "REQUEST_MEDIA", 2 }
 minetest_client_commands[0x41] = { "RECEIVED_MEDIA", 2 }
-
--- TOSERVER_BREATH (obsolete)
-
 minetest_client_commands[0x42] = { "BREATH", 2 }
-minetest_client_obsolete[0x42] = true
-
--- TOSERVER_CLIENT_READY
-
-do
-	local abbr = "minetest.client.client_ready_"
-	local f_major = ProtoField.uint8(abbr.."major","Version Major")
-	local f_minor = ProtoField.uint8(abbr.."minor","Version Minor")
-	local f_patch = ProtoField.uint8(abbr.."patch","Version Patch")
-	local f_reserved = ProtoField.uint8(abbr.."reserved","Reserved")
-	local f_versionlen, f_version =
-		minetest_field_helper("uint16", abbr.."version", "Full Version String")
-	local f_formspec_ver = ProtoField.uint16(abbr.."formspec_version",
-		"Formspec API version")
-
-	minetest_client_commands[0x43] = {
-		"CLIENT_READY",
-		8,
-		{ f_major, f_minor, f_patch, f_reserved, f_versionlen,
-		  f_version, f_formspec_ver },
-		function(buffer, pinfo, tree, t)
-			t:add(f_major, buffer(2,1))
-			t:add(f_minor, buffer(3,1))
-			t:add(f_patch, buffer(4,1))
-			t:add(f_reserved, buffer(5,1))
-			local off = minetest_decode_helper_ascii(buffer, t, "uint16", 6,
-				f_versionlen, f_version)
-			if off and minetest_check_length(buffer, off + 2, t) then
-				t:add(f_formspec_ver, buffer(off,2))
-			end
-		end
-	}
-end
-
--- ...
-
+minetest_client_commands[0x43] = { "CLIENT_READY", 2 }
 minetest_client_commands[0x50] = { "FIRST_SRP", 2 }
 minetest_client_commands[0x51] = { "SRP_BYTES_A", 2 }
 minetest_client_commands[0x52] = { "SRP_BYTES_M", 2 }
-minetest_client_commands[0x53] = { "UPDATE_CLIENT_INFO", 2 }
+
+
 
 --------------------------------------------
--- Part 3                                 --
+-- Part 2                                 --
 -- Server command dissectors (TOCLIENT_*) --
 --------------------------------------------
 
 minetest_server_commands = {}
 minetest_server_obsolete = {}
 
--- TOCLIENT_HELLO
+-- TOCLIENT_INIT
 
-do
-	local abbr = "minetest.server.hello_"
-
-	local f_ser_fmt = ProtoField.uint8(abbr.."ser_version",
-		"Deployed serialization format version", base.DEC)
-	local f_comp_mode = ProtoField.uint16(abbr.."compression",
-		"Deployed compression mode", base.DEC, { [0] = "No compression" })
-	local f_proto = ProtoField.uint16(abbr.."proto",
-		"Deployed protocol version", base.DEC)
-	local f_auth_methods = ProtoField.bytes(abbr.."auth_modes",
-		"Supported authentication modes")
-	local f_legacy_namelen, f_legacy_name = minetest_field_helper("uint16",
-		abbr.."legacy_name", "Legacy player name for hashing")
-
-	minetest_server_commands[0x02] = {
-		"HELLO",
-		13,
-		{ f_ser_fmt, f_comp_mode, f_proto, f_auth_methods,
-		  f_legacy_namelen, f_legacy_name },
-		function(buffer, pinfo, tree, t)
-			t:add(f_ser_fmt, buffer(2,1))
-			t:add(f_comp_mode, buffer(3,2))
-			t:add(f_proto, buffer(5,2))
-			t:add(f_auth_methods, buffer(7,4))
-			minetest_decode_helper_ascii(buffer, t, "uint16", 11, f_legacy_namelen, f_legacy_name)
-		end
-	}
-end
-
--- TOCLIENT_AUTH_ACCEPT
-
-do
-	local abbr = "minetest.server.auth_accept_"
-
-	local f_player_x = ProtoField.float(abbr.."player_x", "Player position X")
-	local f_player_y = ProtoField.float(abbr.."player_y", "Player position Y")
-	local f_player_z = ProtoField.float(abbr.."player_z", "Player position Z")
-	local f_map_seed = ProtoField.uint64(abbr.."map_seed", "Map seed")
-	local f_send_interval = ProtoField.float(abbr.."send_interval",
-		"Recommended send interval")
-	local f_sudo_auth_methods = ProtoField.bytes(abbr.."sudo_auth_methods",
-		"Supported auth methods for sudo mode")
-
-	minetest_server_commands[0x03] = {
-		"AUTH_ACCEPT",
-		30,
-		{ f_player_x, f_player_y, f_player_z, f_map_seed,
-		  f_send_interval, f_sudo_auth_methods },
-		function(buffer, pinfo, tree, t)
-			t:add(f_player_x, buffer(2,4))
-			t:add(f_player_y, buffer(6,4))
-			t:add(f_player_z, buffer(10,4))
-			t:add(f_map_seed, buffer(14,8))
-			t:add(f_send_interval, buffer(22,4))
-			t:add(f_sudo_auth_methods, buffer(26,4))
-		end
-	}
-end
-
--- ...
-
+minetest_server_commands[0x02] = {"HELLO", 2}
+minetest_server_commands[0x03] = {"AUTH_ACCEPT", 2}
 minetest_server_commands[0x04] = {"ACCEPT_SUDO_MODE", 2}
 minetest_server_commands[0x05] = {"DENY_SUDO_MODE", 2}
 minetest_server_commands[0x0A] = {"ACCESS_DENIED", 2}
 
--- TOCLIENT_INIT (obsolete)
+do
+	local f_version = ProtoField.uint8("minetest.server.init_version", "Deployed version", base.DEC)
+	local f_pos_x = ProtoField.int16("minetest.server.init_pos_x", "Position X", base.DEC)
+	local f_pos_y = ProtoField.int16("minetest.server.init_pos_y", "Position Y", base.DEC)
+	local f_pos_z = ProtoField.int16("minetest.server.init_pos_x", "Position Z", base.DEC)
+	local f_map_seed = ProtoField.uint64("minetest.server.init_map_seed", "Map seed", base.DEC)
 
-minetest_server_commands[0x10] = { "INIT", 2 }
-minetest_server_obsolete[0x10] = true
+	minetest_server_commands[0x10] = {
+		"INIT", 17,
+		{ f_version, f_pos_x, f_pos_y, f_pos_z, f_map_seed },
+		function(buffer, pinfo, tree, t)
+			t:add(f_version, buffer(2,1))
+			t:add(f_pos_x, buffer(3,2))
+			t:add(f_pos_y, buffer(5,2))
+			t:add(f_pos_z, buffer(7,2))
+			t:add(f_map_seed, buffer(9,8))
+		end
+	}
+end
 
 -- TOCLIENT_BLOCKDATA
 
@@ -612,10 +544,37 @@ end
 minetest_server_commands[0x23] = { "PLAYERPOS", 2 }
 minetest_server_obsolete[0x23] = true
 
--- TOCLIENT_PLAYERINFO (obsolete)
+-- TOCLIENT_PLAYERINFO
 
-minetest_server_commands[0x24] = { "PLAYERINFO", 2 }
-minetest_server_obsolete[0x24] = true
+do
+	local f_count = ProtoField.uint16("minetest.server.playerinfo_count", "Count", base.DEC)
+	local f_player = ProtoField.bytes("minetest.server.playerinfo_player", "Player", base.NONE)
+	local f_peer_id = ProtoField.uint16("minetest.server.playerinfo_peer_id", "Peer ID", base.DEC)
+	local f_name = ProtoField.string("minetest.server.playerinfo_name", "Name")
+
+	minetest_server_commands[0x24] = {
+		"PLAYERINFO", 2,
+		{ f_count, f_player, f_peer_id, f_name },
+		function(buffer, pinfo, tree, t)
+			local count = 0
+			local pos, index
+			for pos = 2, buffer:len() - 22, 22 do  -- does lua have integer division?
+				count = count + 1
+			end
+			t:add(f_count, count):set_generated()
+			t:set_len(2 + 22 * count)
+			pinfo.cols.info:append(" * " .. count)
+			for index = 0, count - 1 do
+				local pos = 2 + 22 * index
+				local t2 = t:add(f_player, buffer(pos, 22))
+				t2:set_text("Player, ID: " .. buffer(pos, 2):uint()
+					.. ", Name: " .. buffer(pos + 2, 20):string())
+				t2:add(f_peer_id, buffer(pos, 2))
+				t2:add(f_name, buffer(pos + 2, 20))
+			end
+		end
+	}
+end
 
 -- TOCLIENT_OPT_BLOCK_NOT_FOUND (obsolete)
 
@@ -641,71 +600,99 @@ do
 	}
 end
 
--- TOCLIENT_OBJECTDATA (obsolete)
+-- TOCLIENT_OBJECTDATA
 
-minetest_server_commands[0x28] = { "OBJECTDATA", 2 }
-minetest_server_obsolete[0x28] = true
+do
+	local f_player_count = ProtoField.uint16("minetest.server.objectdata_player_count",
+		"Count of player positions", base.DEC)
+	local f_player = ProtoField.bytes("minetest.server.objectdata_player", "Player position")
+	local f_peer_id = ProtoField.uint16("minetest.server.objectdata_player_peer_id", "Peer ID")
+	local f_x = ProtoField.int32("minetest.server.objectdata_player_x", "Position X", base.DEC)
+	local f_y = ProtoField.int32("minetest.server.objectdata_player_y", "Position Y", base.DEC)
+	local f_z = ProtoField.int32("minetest.server.objectdata_player_z", "Position Z", base.DEC)
+	local f_speed_x = ProtoField.int32("minetest.server.objectdata_player_speed_x", "Speed X", base.DEC)
+	local f_speed_y = ProtoField.int32("minetest.server.objectdata_player_speed_y", "Speed Y", base.DEC)
+	local f_speed_z = ProtoField.int32("minetest.server.objectdata_player_speed_z", "Speed Z", base.DEC)
+	local f_pitch = ProtoField.int32("minetest.server.objectdata_player_pitch", "Pitch", base.DEC)
+	local f_yaw = ProtoField.int32("minetest.server.objectdata_player_yaw", "Yaw", base.DEC)
+	local f_block_count = ProtoField.uint16("minetest.server.objectdata_block_count",
+		"Count of blocks", base.DEC)
+
+	minetest_server_commands[0x28] = {
+		"OBJECTDATA", 6,
+		{ f_player_count, f_player, f_peer_id, f_x, f_y, f_z,
+		  f_speed_x, f_speed_y, f_speed_z,f_pitch, f_yaw,
+		  f_block_count },
+		function(buffer, pinfo, tree, t)
+			local t2, index, pos
+
+			local player_count_pos = 2
+			local player_count = buffer(player_count_pos, 2):uint()
+			t:add(f_player_count, buffer(player_count_pos, 2))
+
+			local block_count_pos = player_count_pos + 2 + 34 * player_count
+			if not minetest_check_length(buffer, block_count_pos + 2, t) then
+				return
+			end
+
+			for index = 0, player_count - 1 do
+				pos = player_count_pos + 2 + 34 * index
+				t2 = t:add(f_player, buffer(pos, 34))
+				t2:set_text("Player position, ID: " .. buffer(pos, 2):uint())
+				t2:add(f_peer_id, buffer(pos, 2))
+				t2:add(f_x, buffer(pos + 2, 4))
+				t2:add(f_y, buffer(pos + 6, 4))
+				t2:add(f_z, buffer(pos + 10, 4))
+				t2:add(f_speed_x, buffer(pos + 14, 4))
+				t2:add(f_speed_y, buffer(pos + 18, 4))
+				t2:add(f_speed_z, buffer(pos + 22, 4))
+				t2:add(f_pitch, buffer(pos + 26, 4))
+				t2:add(f_yaw, buffer(pos + 30, 4))
+			end
+
+			local block_count = buffer(block_count_pos, 2):uint()
+			t:add(f_block_count, buffer(block_count_pos, 2))
+
+			-- TODO: dissect blocks.
+			-- NOTE: block_count > 0 is obsolete. (?)
+
+			pinfo.cols.info:append(" * " .. (player_count + block_count))
+		end
+	}
+end
 
 -- TOCLIENT_TIME_OF_DAY
 
 do
 	local f_time = ProtoField.uint16("minetest.server.time_of_day", "Time", base.DEC)
-	local f_time_speed = ProtoField.float("minetest.server.time_speed", "Time Speed", base.DEC)
 
 	minetest_server_commands[0x29] = {
-		"TIME_OF_DAY", 8,
-		{ f_time, f_time_speed },
+		"TIME_OF_DAY", 4,
+		{ f_time },
 		function(buffer, pinfo, tree, t)
 			t:add(f_time, buffer(2,2))
-			t:add(f_time_speed, buffer(4,4))
 		end
 	}
 end
-
--- ...
-
-minetest_server_commands[0x2a] = { "CSM_RESTRICTION_FLAGS", 2 }
-minetest_server_commands[0x2b] = { "PLAYER_SPEED", 2 }
-minetest_server_commands[0x2c] = { "MEDIA_PUSH", 2 }
 
 -- TOCLIENT_CHAT_MESSAGE
 
 do
-	local abbr = "minetest.server.chat_message_"
-	local vs_type = {
-		[0] = "Raw",
-		[1] = "Normal",
-		[2] = "Announce",
-		[3] = "System",
-	}
+	local f_length = ProtoField.uint16("minetest.server.chat_message_length", "Length", base.DEC)
+	local f_message = ProtoField.string("minetest.server.chat_message", "Message")
 
-	local f_version = ProtoField.uint8(abbr.."version", "Version")
-	local f_type = ProtoField.uint8(abbr.."type", "Message Type", base.DEC, vs_type)
-	local f_senderlen, f_sender = minetest_field_helper("uint16", abbr.."sender",
-		"Message sender")
-	local f_messagelen, f_message = minetest_field_helper("uint16", abbr:sub(1,-2),
-		"Message")
-
-	minetest_server_commands[0x2f] = {
-		"CHAT_MESSAGE", 8,
-		{ f_version, f_type, f_senderlen, f_sender,
-		  f_messagelen, f_message },
+	minetest_server_commands[0x30] = {
+		"CHAT_MESSAGE", 4,
+		{ f_length, f_message },
 		function(buffer, pinfo, tree, t)
-			t:add(f_version, buffer(2,1))
-			t:add(f_type, buffer(3,1))
-			local off = 4
-			off = minetest_decode_helper_utf16(buffer, t, "uint16", off, f_senderlen, f_sender)
-			if off then
-				off = minetest_decode_helper_utf16(buffer, t, "uint16", off, f_messagelen, f_message)
+			t:add(f_length, buffer(2,2))
+			local textlen = buffer(2,2):uint()
+			if minetest_check_length(buffer, 4 + textlen*2, t) then
+				t:add(f_message, minetest_convert_utf16(buffer(4, textlen*2), "Converted chat message"))
 			end
 		end
 	}
 end
-
--- TOCLIENT_CHAT_MESSAGE_OLD (obsolete)
-
-minetest_server_commands[0x30] = { "CHAT_MESSAGE_OLD", 2 }
-minetest_server_obsolete[0x30] = true
 
 -- TOCLIENT_ACTIVE_OBJECT_REMOVE_ADD
 
@@ -855,13 +842,13 @@ end
 -- TOCLIENT_HP
 
 do
-	local f_hp = ProtoField.uint16("minetest.server.hp", "Health points", base.DEC)
+	local f_hp = ProtoField.uint8("minetest.server.hp", "Hitpoints", base.DEC)
 
 	minetest_server_commands[0x33] = {
-		"HP", 4,
+		"HP", 3,
 		{ f_hp },
 		function(buffer, pinfo, tree, t)
-			t:add(f_hp, buffer(2,2))
+			t:add(f_hp, buffer(2,1))
 		end
 	}
 end
@@ -869,71 +856,145 @@ end
 -- TOCLIENT_MOVE_PLAYER
 
 do
-	local abbr = "minetest.server.move_player_"
-
-	local f_x = ProtoField.float(abbr.."x", "Position X")
-	local f_y = ProtoField.float(abbr.."y", "Position Y")
-	local f_z = ProtoField.float(abbr.."z", "Position Z")
-	local f_pitch = ProtoField.float(abbr.."_pitch", "Pitch")
-	local f_yaw = ProtoField.float(abbr.."yaw", "Yaw")
+	local f_x = ProtoField.int32("minetest.server.move_player_x", "Position X", base.DEC)
+	local f_y = ProtoField.int32("minetest.server.move_player_y", "Position Y", base.DEC)
+	local f_z = ProtoField.int32("minetest.server.move_player_z", "Position Z", base.DEC)
+	local f_pitch = ProtoField.int32("minetest.server.move_player_pitch", "Pitch", base.DEC)
+	local f_yaw = ProtoField.int32("minetest.server.move_player_yaw", "Yaw", base.DEC)
+	local f_garbage = ProtoField.bytes("minetest.server.move_player_garbage", "Garbage")
 
 	minetest_server_commands[0x34] = {
-		"MOVE_PLAYER", 22,
+		"MOVE_PLAYER", 18,  -- actually 22, but see below
 		{ f_x, f_y, f_z, f_pitch, f_yaw, f_garbage },
 		function(buffer, pinfo, tree, t)
 			t:add(f_x, buffer(2, 4))
 			t:add(f_y, buffer(6, 4))
 			t:add(f_z, buffer(10, 4))
-			t:add(f_pitch, buffer(14, 4))
-			t:add(f_yaw, buffer(18, 4))
+
+			-- Compatibility note:
+			-- Up to 2011-08-23, there was a bug in Minetest that
+			-- caused the server to serialize the pitch and yaw
+			-- with 2 bytes each instead of 4, creating a
+			-- malformed message.
+			if buffer:len() >= 22 then
+				t:add(f_pitch, buffer(14, 4))
+				t:add(f_yaw, buffer(18, 4))
+			else
+				t:add(f_garbage, buffer(14, 4))
+				t:add_expert_info(PI_MALFORMED, PI_WARN, "Malformed pitch and yaw, possibly caused by a serialization bug in Minetest")
+			end
 		end
 	}
 end
 
--- TOCLIENT_ACCESS_DENIED_LEGACY
+-- TOCLIENT_ACCESS_DENIED
 
 do
-	local f_reasonlen, f_reason = minetest_field_helper("uint16",
-		"minetest.server.access_denied_reason", "Reason")
+	local f_reason_length = ProtoField.uint16("minetest.server.access_denied_reason_length", "Reason length", base.DEC)
+	local f_reason = ProtoField.string("minetest.server.access_denied_reason", "Reason")
 
 	minetest_server_commands[0x35] = {
-		"ACCESS_DENIED_LEGACY", 4,
-		{ f_reasonlen, f_reason },
+		"ACCESS_DENIED", 4,
+		{ f_reason_length, f_reason },
 		function(buffer, pinfo, tree, t)
-			local off = 2
-			minetest_decode_helper_utf16(buffer, t, "uint16", off, f_reasonlen, f_reason)
+			t:add(f_reason_length, buffer(2,2))
+			local reason_length = buffer(2,2):uint()
+			if minetest_check_length(buffer, 4 + reason_length * 2, t) then
+				t:add(f_reason, minetest_convert_utf16(buffer(4, reason_length * 2), "Converted reason message"))
+			end
 		end
 	}
 end
 
--- TOCLIENT_FOV
+-- TOCLIENT_PLAYERITEM
 
-minetest_server_commands[0x36] = { "FOV", 2 }
+do
+	local f_count = ProtoField.uint16(
+		"minetest.server.playeritem_count",
+		"Count of players", base.DEC)
+	local f_player = ProtoField.bytes(
+		"minetest.server.playeritem_player",
+		"Player")
+	local f_peer_id = ProtoField.uint16(
+		"minetest.server.playeritem_peer_id",
+		"Peer ID", base.DEC)
+	local f_item_length = ProtoField.uint16(
+		"minetest.server.playeritem_item_length",
+		"Item information length", base.DEC)
+	local f_item = ProtoField.string(
+		"minetest.server.playeritem_item",
+		"Item information")
 
--- TOCLIENT_DEATHSCREEN_LEGACY
+	minetest_server_commands[0x36] = {
+		"PLAYERITEM", 4,
+		{ f_count, f_player, f_peer_id, f_item_length, f_item },
+		function(buffer, pinfo, tree, t)
+			local count, index, pos, item_length
 
-minetest_server_commands[0x37] = { "DEATHSCREEN_LEGACY", 2 }
+			count = buffer(2,2):uint()
+			pinfo.cols.info:append(" * " .. count)
+			t:add(f_count, buffer(2,2))
 
--- TOCLIENT_MEDIA
+			pos = 4
+			for index = 0, count - 1 do
+				if not minetest_check_length(buffer, pos + 4, t) then
+					return
+				end
+				item_length = buffer(pos + 2, 2):uint()
+				if not minetest_check_length(buffer, pos + 4 + item_length, t) then
+					return
+				end
+
+				local t2 = t:add(f_player, buffer(pos, 4 + item_length))
+				t2:set_text("Player, ID: " .. buffer(pos, 2):uint())
+				t2:add(f_peer_id, buffer(pos, 2))
+				t2:add(f_item_length, buffer(pos + 2, 2))
+				t2:add(f_item, buffer(pos + 4, item_length))
+
+				pos = pos + 4 + item_length
+			end
+		end
+	}
+end
+
+-- TOCLIENT_DEATHSCREEN
+
+do
+	local vs_set_camera_point_target = {
+		[0] = "False",
+		[1] = "True"
+	}
+
+	local f_set_camera_point_target = ProtoField.uint8(
+		"minetest.server.deathscreen_set_camera_point_target",
+		"Set camera point target", base.DEC, vs_set_camera_point_target)
+	local f_camera_point_target_x = ProtoField.int32(
+		"minetest.server.deathscreen_camera_point_target_x",
+		"Camera point target X", base.DEC)
+	local f_camera_point_target_y = ProtoField.int32(
+		"minetest.server.deathscreen_camera_point_target_y",
+		"Camera point target Y", base.DEC)
+	local f_camera_point_target_z = ProtoField.int32(
+		"minetest.server.deathscreen_camera_point_target_z",
+		"Camera point target Z", base.DEC)
+
+	minetest_server_commands[0x37] = {
+		"DEATHSCREEN", 15,
+		{ f_set_camera_point_target, f_camera_point_target_x,
+		  f_camera_point_target_y, f_camera_point_target_z},
+		function(buffer, pinfo, tree, t)
+			t:add(f_set_camera_point_target, buffer(2,1))
+			t:add(f_camera_point_target_x, buffer(3,4))
+			t:add(f_camera_point_target_y, buffer(7,4))
+			t:add(f_camera_point_target_z, buffer(11,4))
+		end
+	}
+end
 
 minetest_server_commands[0x38] = {"MEDIA", 2}
-
--- TOCLIENT_TOOLDEF (obsolete)
-
 minetest_server_commands[0x39] = {"TOOLDEF", 2}
-minetest_server_obsolete[0x39] = true
-
--- TOCLIENT_NODEDEF
-
 minetest_server_commands[0x3a] = {"NODEDEF", 2}
-
--- TOCLIENT_CRAFTITEMDEF (obsolete)
-
 minetest_server_commands[0x3b] = {"CRAFTITEMDEF", 2}
-minetest_server_obsolete[0x3b] = true
-
--- ...
-
 minetest_server_commands[0x3c] = {"ANNOUNCE_MEDIA", 2}
 minetest_server_commands[0x3d] = {"ITEMDEF", 2}
 minetest_server_commands[0x3f] = {"PLAY_SOUND", 2}
@@ -944,77 +1005,11 @@ minetest_server_commands[0x43] = {"DETACHED_INVENTORY", 2}
 minetest_server_commands[0x44] = {"SHOW_FORMSPEC", 2}
 minetest_server_commands[0x45] = {"MOVEMENT", 2}
 minetest_server_commands[0x46] = {"SPAWN_PARTICLE", 2}
-minetest_server_commands[0x47] = {"ADD_PARTICLESPAWNER", 2}
-minetest_server_commands[0x48] = {"CAMERA", 2}
+minetest_server_commands[0x47] = {"ADD_PARTICLE_SPAWNER", 2}
+minetest_server_commands[0x48] = {"DELETE_PARTICLESPAWNER_LEGACY", 2}
 minetest_server_commands[0x49] = {"HUDADD", 2}
 minetest_server_commands[0x4a] = {"HUDRM", 2}
-
--- TOCLIENT_HUDCHANGE
-
-do
-	local abbr = "minetest.server.hudchange_"
-	local vs_stat = {
-		[0] = "pos",
-		[1] = "name",
-		[2] = "scale",
-		[3] = "text",
-		[4] = "number",
-		[5] = "item",
-		[6] = "dir",
-		[7] = "align",
-		[8] = "offset",
-		[9] = "world_pos",
-		[10] = "size",
-		[11] = "z_index",
-		[12] = "text2",
-		[13] = "style",
-	}
-	local uses_v2f = {
-		[0] = true, [2] = true, [7] = true, [8] = true,
-	}
-	local uses_string = {
-		[1] = true, [3] = true, [12] = true,
-	}
-
-	local f_id = ProtoField.uint32(abbr.."id", "HUD ID", base.DEC)
-	local f_stat = ProtoField.uint8(abbr.."stat", "HUD Type", base.DEC, vs_stat)
-	local f_x = ProtoField.float(abbr.."x", "Position X")
-	local f_y = ProtoField.float(abbr.."y", "Position Y")
-	local f_z = ProtoField.float(abbr.."z", "Position Z")
-	local f_str = ProtoField.string(abbr.."string", "String data")
-	local f_sx = ProtoField.int32(abbr.."sy", "Size X", base.DEC)
-	local f_sy = ProtoField.int32(abbr.."sz", "Size Y", base.DEC)
-	local f_int = ProtoField.uint32(abbr.."int", "Integer data", base.DEC)
-
-	minetest_server_commands[0x4b] = {
-		"HUDCHANGE", 7,
-		{ f_id, f_stat, f_x, f_y, f_z, f_str, f_sx, f_sy, f_int, },
-		function(buffer, pinfo, tree, t)
-			t:add(f_id, buffer(2,4))
-			t:add(f_stat, buffer(6,1))
-			local stat = buffer(6,1):uint()
-			local off = 7
-			if uses_v2f[stat] then
-				t:add(f_x, buffer(off,4))
-				t:add(f_y, buffer(off+4,4))
-			elseif uses_string[stat] then
-				minetest_decode_helper_ascii(buffer, t, "uint16", off, nil, f_str)
-			elseif stat == 9 then -- v3f
-				t:add(f_x, buffer(off,4))
-				t:add(f_y, buffer(off+4,4))
-				t:add(f_z, buffer(off+8,4))
-			elseif stat == 10 then -- v2s32
-				t:add(f_sx, buffer(off,4))
-				t:add(f_sy, buffer(off+8,4))
-			else
-				t:add(f_int, buffer(off,4))
-			end
-		end
-	}
-end
-
--- ...
-
+minetest_server_commands[0x4b] = {"HUDCHANGE", 2}
 minetest_server_commands[0x4c] = {"HUD_SET_FLAGS", 2}
 minetest_server_commands[0x4d] = {"HUD_SET_PARAM", 2}
 minetest_server_commands[0x4e] = {"BREATH", 2}
@@ -1025,73 +1020,24 @@ minetest_server_commands[0x52] = {"EYE_OFFSET", 2}
 minetest_server_commands[0x53] = {"DELETE_PARTICLESPAWNER", 2}
 minetest_server_commands[0x54] = {"CLOUD_PARAMS", 2}
 minetest_server_commands[0x55] = {"FADE_SOUND", 2}
-
--- TOCLIENT_UPDATE_PLAYER_LIST
-
-do
-	local abbr = "minetest.server.update_player_list_"
-	local vs_type = {
-		[0] = "Init",
-		[1] = "Add",
-		[2] = "Remove",
-	}
-
-	local f_type = ProtoField.uint8(abbr.."type", "Type", base.DEC, vs_type)
-	local f_count = ProtoField.uint16(abbr.."count", "Number of players", base.DEC)
-	local f_name = ProtoField.string(abbr.."name", "Name")
-
-	minetest_server_commands[0x56] = {
-		"UPDATE_PLAYER_LIST",
-		5,
-		{ f_type, f_count, f_name },
-		function(buffer, pinfo, tree, t)
-			t:add(f_type, buffer(2,1))
-			t:add(f_count, buffer(3,2))
-			local count = buffer(3,2):uint()
-			local off = 5
-			for i = 1, count do
-				if not minetest_check_length(buffer, off + 2, t) then
-					return
-				end
-				off = minetest_decode_helper_ascii(buffer, t, "uint16", off, nil, f_name)
-				if not off then
-					return
-				end
-			end
-		end
-	}
-end
-
--- ...
-
-minetest_server_commands[0x57] = {"MODCHANNEL_MSG", 2}
-minetest_server_commands[0x58] = {"MODCHANNEL_SIGNAL", 2}
-minetest_server_commands[0x59] = {"NODEMETA_CHANGED", 2}
-minetest_server_commands[0x5a] = {"SET_SUN", 2}
-minetest_server_commands[0x5b] = {"SET_MOON", 2}
-minetest_server_commands[0x5c] = {"SET_STARS", 2}
-minetest_server_commands[0x5d] = {"MOVE_PLAYER_REL", 2}
-minetest_server_commands[0x60] = {"SRP_BYTES_S_B", 2}
-minetest_server_commands[0x61] = {"FORMSPEC_PREPEND", 2}
-minetest_server_commands[0x62] = {"MINIMAP_MODES", 2}
-minetest_server_commands[0x63] = {"SET_LIGHTING", 2}
+minetest_server_commands[0x61] = {"SRP_BYTES_S_B", 2}
 
 
 ------------------------------------
--- Part 4                         --
+-- Part 3                         --
 -- Wrapper protocol subdissectors --
 ------------------------------------
 
 -- minetest.control dissector
 
 do
-	local p_control = Proto("minetest.control", "Luanti Control")
+	local p_control = Proto("minetest.control", "Minetest Control")
 
 	local vs_control_type = {
 		[0] = "Ack",
 		[1] = "Set Peer ID",
 		[2] = "Ping",
-		[3] = "Disconnect"
+		[3] = "Disco"
 	}
 
 	local f_control_type = ProtoField.uint8("minetest.control.type", "Control Type", base.DEC, vs_control_type)
@@ -1121,7 +1067,7 @@ do
 		elseif buffer(0,1):uint() == 2 then
 			pinfo.cols.info = "Ping"
 		elseif buffer(0,1):uint() == 3 then
-			pinfo.cols.info = "Disconnect"
+			pinfo.cols.info = "Disco"
 		end
 
 		data_dissector:call(buffer(pos):tvb(), pinfo, tree)
@@ -1147,19 +1093,19 @@ function minetest_define_client_or_server_proto(is_client)
 		this_peer = "Client"
 		other_peer = "Server"
 		empty_message_info = "Empty message / Connect"
-		commands = minetest_client_commands  -- defined in Part 2
-		obsolete = minetest_client_obsolete  -- defined in Part 2
+		commands = minetest_client_commands  -- defined in Part 1
+		obsolete = minetest_client_obsolete  -- defined in Part 1
 	else
 		proto_name = "minetest.server"
 		this_peer = "Server"
 		other_peer = "Client"
 		empty_message_info = "Empty message"
-		commands = minetest_server_commands  -- defined in Part 3
-		obsolete = minetest_server_obsolete  -- defined in Part 3
+		commands = minetest_server_commands  -- defined in Part 2
+		obsolete = minetest_server_obsolete  -- defined in Part 2
 	end
 
 	-- Create the protocol object.
-	local proto = Proto(proto_name, "Luanti " .. this_peer .. " to " .. other_peer)
+	local proto = Proto(proto_name, "Minetest " .. this_peer .. " to " .. other_peer)
 
 	-- Create a table vs_command that maps command codes to command names.
 	local vs_command = {}
@@ -1178,8 +1124,8 @@ function minetest_define_client_or_server_proto(is_client)
 	for code, command_info in pairs(commands) do
 		local command_fields = command_info[3]
 		if command_fields ~= nil then
+			local index, field
 			for index, field in ipairs(command_fields) do
-				assert(field ~= nil)
 				table.insert(proto.fields, field)
 			end
 		end
@@ -1189,10 +1135,7 @@ function minetest_define_client_or_server_proto(is_client)
 	function proto.dissector(buffer, pinfo, tree)
 		local t = tree:add(proto, buffer)
 
-		-- If we're nested, don't reset
-		if string.find(tostring(pinfo.cols.info), this_peer, 1, true) ~= 1 then
-			pinfo.cols.info = this_peer
-		end
+		pinfo.cols.info = this_peer
 
 		if buffer:len() == 0 then
 			-- Empty message.
@@ -1214,8 +1157,8 @@ function minetest_define_client_or_server_proto(is_client)
 				local command_min_length = command_info[2]
 				local command_fields = command_info[3]
 				local command_dissector = command_info[4]
-				pinfo.cols.info:append(": " .. command_name)
 				if minetest_check_length(buffer, command_min_length, t) then
+					pinfo.cols.info:append(": " .. command_name)
 					if command_dissector ~= nil then
 						command_dissector(buffer, pinfo, tree, t)
 					end
@@ -1234,7 +1177,7 @@ minetest_define_client_or_server_proto(false) -- minetest.server
 -- minetest.split dissector
 
 do
-	local p_split = Proto("minetest.split", "Luanti Split Message")
+	local p_split = Proto("minetest.split", "Minetest Split Message")
 
 	local f_split_seq = ProtoField.uint16("minetest.split.seq", "Sequence number", base.DEC)
 	local f_split_chunkcount = ProtoField.uint16("minetest.split.chunkcount", "Chunk count", base.DEC)
@@ -1249,17 +1192,6 @@ do
 		t:add(f_split_chunknum, buffer(4,2))
 		t:add(f_split_data, buffer(6))
 		pinfo.cols.info:append(" " .. buffer(0,2):uint() .. " chunk " .. buffer(4,2):uint() .. "/" .. buffer(2,2):uint())
-		-- If it's the first chunk, read the peer id from the upper layer and
-		-- pass the data that we have to the right dissector.
-		-- this provides at least a partial decoding
-		if buffer(4,2):uint() == 0 then
-			local peer_id = minetest_peer_field()
-			if peer_id.value and peer_id.value == 1 then
-				Dissector.get("minetest.server"):call(buffer(6):tvb(), pinfo, tree)
-			elseif peer_id.value then
-				Dissector.get("minetest.client"):call(buffer(6):tvb(), pinfo, tree)
-			end
-		end
 	end
 end
 
@@ -1267,12 +1199,14 @@ end
 
 
 -------------------------------------
--- Part 5                          --
+-- Part 4                          --
 -- Wrapper protocol main dissector --
 -------------------------------------
 
+-- minetest dissector
+
 do
-	local p_minetest = Proto("minetest", "Luanti")
+	local p_minetest = Proto("minetest", "Minetest")
 
 	local minetest_id = 0x4f457403
 	local vs_id = {
@@ -1291,7 +1225,7 @@ do
 		[3] = "Reliable"
 	}
 
-	local f_id = ProtoField.uint32("minetest.id", "Protocol ID", base.HEX, vs_id)
+	local f_id = ProtoField.uint32("minetest.id", "ID", base.HEX, vs_id)
 	local f_peer = ProtoField.uint16("minetest.peer", "Peer", base.DEC, vs_peer)
 	local f_channel = ProtoField.uint8("minetest.channel", "Channel", base.DEC)
 	local f_type = ProtoField.uint8("minetest.type", "Type", base.DEC, vs_type)
@@ -1308,28 +1242,25 @@ do
 
 	function p_minetest.dissector(buffer, pinfo, tree)
 
-		-- Defer if payload doesn't have Minetest's magic number
-		if buffer(0,4):uint() ~= minetest_id then
-			return false
-		end
-
-		-- Add Minetest tree item
+		-- Add Minetest tree item and verify the ID
 		local t = tree:add(p_minetest, buffer(0,8))
 		t:add(f_id, buffer(0,4))
+		if buffer(0,4):uint() ~= minetest_id then
+			t:add_expert_info(PI_UNDECODED, PI_WARN, "Invalid ID, this is not a Minetest packet")
+			return
+		end
 
 		-- ID is valid, so replace packet's shown protocol
-		pinfo.cols.protocol = "Luanti"
-		pinfo.cols.info = "Luanti"
+		pinfo.cols.protocol = "Minetest"
+		pinfo.cols.info = "Minetest"
 
 		-- Set the other header fields
-		local peer_id = buffer(4,2):uint()
 		t:add(f_peer, buffer(4,2))
 		t:add(f_channel, buffer(6,1))
 		t:add(f_type, buffer(7,1))
-		t:set_text("Luanti, Peer: " .. peer_id .. ", Channel: " .. buffer(6,1):uint())
+		t:set_text("Minetest, Peer: " .. buffer(4,2):uint() .. ", Channel: " .. buffer(6,1):uint())
 
 		local reliability_info
-		local pos
 		if buffer(7,1):uint() == 3 then
 			-- Reliable message
 			reliability_info = "Seq=" .. buffer(8,2):uint()
@@ -1348,14 +1279,14 @@ do
 			control_dissector:call(buffer(pos+1):tvb(), pinfo, tree)
 		elseif buffer(pos,1):uint() == 1 then
 			-- Original message, possibly reliable
-			if peer_id == 1 then
+			if buffer(4,2):uint() == 1 then
 				server_dissector:call(buffer(pos+1):tvb(), pinfo, tree)
 			else
 				client_dissector:call(buffer(pos+1):tvb(), pinfo, tree)
 			end
 		elseif buffer(pos,1):uint() == 2 then
 			-- Split message, possibly reliable
-			if peer_id == 1 then
+			if buffer(4,2):uint() == 1 then
 				pinfo.cols.info = "Server: Split message"
 			else
 				pinfo.cols.info = "Client: Split message"
@@ -1369,22 +1300,21 @@ do
 		end
 
 		pinfo.cols.info:append(" (" .. reliability_info .. ")")
-		return true
 
 	end
 
-	p_minetest:register_heuristic("udp", p_minetest.dissector)
+	-- FIXME Is there a way to let the dissector table check if the first payload bytes are 0x4f457403?
+	DissectorTable.get("udp.port"):add(30000, p_minetest)
+	DissectorTable.get("udp.port"):add(30001, p_minetest)
 end
 
 
 
 
-------------------------------
--- Part 6                   --
--- Utility functions part 2 --
-------------------------------
-
-minetest_peer_field = Field.new("minetest.peer")
+-----------------------
+-- Part 5            --
+-- Utility functions --
+-----------------------
 
 -- Checks if a (sub-)Tvb is long enough to be further dissected.
 -- If it is long enough, sets the dissector tree item length to min_len
@@ -1399,11 +1329,14 @@ function minetest_check_length(tvb, min_len, t)
 		t:set_len(min_len)
 		return true
 
-	-- TODO: check if other parts of
+	-- Tvb:reported_length_remaining() has been added in August 2011
+	-- and is not yet widely available, disable for the time being
+	-- TODO: uncomment at a later date
+	-- TODO: when uncommenting this, also re-check if other parts of
 	-- the dissector could benefit from reported_length_remaining
-	elseif tvb:reported_length_remaining() >= min_len then
-		t:add_expert_info(PI_UNDECODED, PI_INFO, "Only part of this packet was captured, unable to decode.")
-		return false
+	--elseif tvb:reported_length_remaining() >= min_len then
+	--	t:add_expert_info(PI_UNDECODED, PI_INFO, "Only part of this packet was captured, unable to decode.")
+	--	return false
 
 	else
 		t:add_expert_info(PI_MALFORMED, PI_ERROR, "Message is too short")
@@ -1411,37 +1344,32 @@ function minetest_check_length(tvb, min_len, t)
 	end
 end
 
--- Decodes a variable-length string as ASCII text
--- t_textlen, t_text should be the ProtoFields created by minetest_field_helper
---   alternatively t_text can be a ProtoField.string and t_textlen can be nil
--- lentype must be the type of the length field (as passed to minetest_field_helper)
--- returns nil if length check failed
-function minetest_decode_helper_ascii(tvb, t, lentype, offset, f_textlen, f_text)
-	local n = ({uint16 = 2, uint32 = 4})[lentype]
-	assert(n)
-
-	if f_textlen then
-		t:add(f_textlen, tvb(offset, n))
+-- Takes a Tvb or TvbRange (i.e. part of a packet) that
+-- contains a UTF-16 string and returns a TvbRange containing
+-- string converted to ASCII. Any characters outside the range
+-- 0x20 to 0x7e are replaced by a question mark.
+-- Parameter: tvb: Tvb or TvbRange that contains the UTF-16 data
+-- Parameter: name: will be the name of the newly created Tvb.
+-- Returns: New TvbRange containing the ASCII string.
+-- TODO: Handle surrogates (should only produce one question mark)
+-- TODO: Remove this when Wireshark supports UTF-16 strings natively.
+function minetest_convert_utf16(tvb, name)
+	local hex, pos, char
+	hex = ""
+	for pos = 0, tvb:len() - 2, 2 do
+		char = tvb(pos, 2):uint()
+		if (char >= 0x20) and (char <= 0x7e) then
+			hex = hex .. string.format(" %02x", char)
+		else
+			hex = hex .. " 3F"
+		end
 	end
-	local textlen = tvb(offset, n):uint()
-	if minetest_check_length(tvb, offset + n + textlen, t) then
-		t:add(f_text, tvb(offset + n, textlen))
-		return offset + n + textlen
-	end
-end
-
--- Decodes a variable-length string as UTF-16 text
--- (see minetest_decode_helper_ascii)
-function minetest_decode_helper_utf16(tvb, t, lentype, offset, f_textlen, f_text)
-	local n = ({uint16 = 2, uint32 = 4})[lentype]
-	assert(n)
-
-	if f_textlen then
-		t:add(f_textlen, tvb(offset, n))
-	end
-	local textlen = tvb(offset, n):uint() * 2
-	if minetest_check_length(tvb, offset + n + textlen, t) then
-		t:add(f_text, tvb(offset + n, textlen), tvb(offset + n, textlen):ustring())
-		return offset + n + textlen
+	if hex == "" then
+		-- This is a hack to avoid a failed assertion in tvbuff.c
+		-- (function: ensure_contiguous_no_exception)
+		return ByteArray.new("00"):tvb(name):range(0,0)
+	else
+		return ByteArray.new(hex):tvb(name):range()
 	end
 end
+

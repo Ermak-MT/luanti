@@ -1,13 +1,27 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2018 nerzhul, Loic Blot <loic.blot@unix-experience.fr>
+/*
+Minetest
+Copyright (C) 2018 nerzhul, Loic Blot <loic.blot@unix-experience.fr>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "mods.h"
 #include "filesys.h"
 #include "log.h"
 #include "scripting_server.h"
 #include "content/subgames.h"
-#include "porting.h"
 
 /**
  * Manage server mods
@@ -15,75 +29,82 @@
  * All new calls to this class must be tested in test_servermodmanager.cpp
  */
 
-ServerModManager::ServerModManager(const std::string &worldpath, SubgameSpec gamespec)
+/**
+ * Creates a ServerModManager which targets worldpath
+ * @param worldpath
+ */
+ServerModManager::ServerModManager(const std::string &worldpath) :
+		ModConfiguration(worldpath)
 {
+	SubgameSpec gamespec = findWorldSubgame(worldpath);
+
 	// Add all game mods and all world mods
-	configuration.addGameMods(gamespec);
-	configuration.addModsInPath(worldpath + DIR_DELIM + "worldmods", "worldmods");
+	addModsInPath(gamespec.gamemods_path);
+	addModsInPath(worldpath + DIR_DELIM + "worldmods");
 
 	// Load normal mods
 	std::string worldmt = worldpath + DIR_DELIM + "world.mt";
-	configuration.addModsFromConfig(worldmt, gamespec.addon_mods_paths);
-	configuration.checkConflictsAndDeps();
+	addModsFromConfig(worldmt, gamespec.addon_mods_paths);
 }
 
+// clang-format off
 // This function cannot be currenctly easily tested but it should be ASAP
-void ServerModManager::loadMods(ServerScripting &script)
+void ServerModManager::loadMods(ServerScripting *script)
 {
 	// Print mods
 	infostream << "Server: Loading mods: ";
-	for (const ModSpec &mod : configuration.getMods()) {
+	for (const ModSpec &mod : m_sorted_mods) {
 		infostream << mod.name << " ";
 	}
 	infostream << std::endl;
-
 	// Load and run "mod" scripts
-	auto t0 = porting::getTimeMs();
-	for (const ModSpec &mod : configuration.getMods()) {
-		mod.checkAndLog();
-
-		auto t1 = porting::getTimeMs();
+	for (const ModSpec &mod : m_sorted_mods) {
+		if (!string_allowed(mod.name, MODNAME_ALLOWED_CHARS)) {
+			throw ModError("Error loading mod \"" + mod.name +
+					"\": Mod name does not follow naming "
+					"conventions: "
+					"Only characters [a-z0-9_] are allowed.");
+		}
 		std::string script_path = mod.path + DIR_DELIM + "init.lua";
-		script.loadMod(script_path, mod.name);
+		infostream << "  [" << padStringRight(mod.name, 12) << "] [\""
+			<< script_path << "\"]" << std::endl;
+		auto t = std::chrono::steady_clock::now();
+		script->loadMod(script_path, mod.name);
 		infostream << "Mod \"" << mod.name << "\" loaded after "
-			<< (porting::getTimeMs() - t1) << " ms" << std::endl;
+			<< std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - t).count() * 0.001f
+			<< " seconds" << std::endl;
 	}
 
 	// Run a callback when mods are loaded
-	script.on_mods_loaded();
-
-	infostream << "All mods loaded after " << (porting::getTimeMs() - t0)
-		<< " ms" << std::endl;
+	script->on_mods_loaded();
 }
 
+// clang-format on
 const ModSpec *ServerModManager::getModSpec(const std::string &modname) const
 {
-	for (const auto &mod : configuration.getMods()) {
+	std::vector<ModSpec>::const_iterator it;
+	for (it = m_sorted_mods.begin(); it != m_sorted_mods.end(); ++it) {
+		const ModSpec &mod = *it;
 		if (mod.name == modname)
 			return &mod;
 	}
-
-	return nullptr;
+	return NULL;
 }
 
 void ServerModManager::getModNames(std::vector<std::string> &modlist) const
 {
-	for (const ModSpec &spec : configuration.getMods())
+	for (const ModSpec &spec : m_sorted_mods)
 		modlist.push_back(spec.name);
 }
 
 void ServerModManager::getModsMediaPaths(std::vector<std::string> &paths) const
 {
-	// Iterate mods in reverse load order: Media loading expects higher priority media files first
-	// and mods loading later should be able to override media of already loaded mods
-	const auto &mods = configuration.getMods();
-	for (auto it = mods.crbegin(); it != mods.crend(); it++) {
-		const ModSpec &spec = *it;
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "textures");
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "sounds");
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "media");
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "models");
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "locale");
-		fs::GetRecursiveDirs(paths, spec.path + DIR_DELIM + "fonts");
+	for (const ModSpec &spec : m_sorted_mods) {
+		paths.push_back(spec.path + DIR_DELIM + "textures");
+		paths.push_back(spec.path + DIR_DELIM + "sounds");
+		paths.push_back(spec.path + DIR_DELIM + "media");
+		paths.push_back(spec.path + DIR_DELIM + "models");
+		paths.push_back(spec.path + DIR_DELIM + "locale");
 	}
 }

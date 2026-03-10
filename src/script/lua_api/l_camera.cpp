@@ -1,15 +1,29 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "l_camera.h"
+#include <cmath>
 #include "script/common/c_converter.h"
 #include "l_internal.h"
 #include "client/content_cao.h"
 #include "client/camera.h"
 #include "client/client.h"
-#include "client/localplayer.h"
-#include <ICameraSceneNode.h>
 
 LuaCamera::LuaCamera(Camera *m) : m_camera(m)
 {
@@ -37,7 +51,6 @@ void LuaCamera::create(lua_State *L, Camera *m)
 	lua_setfield(L, objectstable, "camera");
 }
 
-// set_camera_mode(self, mode)
 int LuaCamera::l_set_camera_mode(lua_State *L)
 {
 	Camera *camera = getobject(L, 1);
@@ -49,25 +62,22 @@ int LuaCamera::l_set_camera_mode(lua_State *L)
 		return 0;
 
 	camera->setCameraMode((CameraMode)((int)lua_tonumber(L, 2)));
-	// Make the player visible depending on camera mode.
-	playercao->updateMeshCulling();
+	playercao->setVisible(camera->getCameraMode() > CAMERA_MODE_FIRST);
 	playercao->setChildrenVisible(camera->getCameraMode() > CAMERA_MODE_FIRST);
 	return 0;
 }
 
-// get_camera_mode(self)
 int LuaCamera::l_get_camera_mode(lua_State *L)
 {
 	Camera *camera = getobject(L, 1);
 	if (!camera)
 		return 0;
 
-	lua_pushinteger(L, (int)camera->getCameraMode());
+	lua_pushnumber(L, (int)camera->getCameraMode());
 
 	return 1;
 }
 
-// get_fov(self)
 int LuaCamera::l_get_fov(lua_State *L)
 {
 	Camera *camera = getobject(L, 1);
@@ -75,9 +85,9 @@ int LuaCamera::l_get_fov(lua_State *L)
 		return 0;
 
 	lua_newtable(L);
-	lua_pushnumber(L, camera->getFovX() * core::RADTODEG);
+	lua_pushnumber(L, camera->getFovX() * core::DEGTORAD);
 	lua_setfield(L, -2, "x");
-	lua_pushnumber(L, camera->getFovY() * core::RADTODEG);
+	lua_pushnumber(L, camera->getFovY() * core::DEGTORAD);
 	lua_setfield(L, -2, "y");
 	lua_pushnumber(L, camera->getCameraNode()->getFOV() * core::RADTODEG);
 	lua_setfield(L, -2, "actual");
@@ -86,18 +96,16 @@ int LuaCamera::l_get_fov(lua_State *L)
 	return 1;
 }
 
-// get_pos(self)
 int LuaCamera::l_get_pos(lua_State *L)
 {
 	Camera *camera = getobject(L, 1);
 	if (!camera)
 		return 0;
 
-	push_v3f(L, camera->getPosition() / BS);
+	push_v3f(L, camera->getPosition());
 	return 1;
 }
 
-// get_offset(self)
 int LuaCamera::l_get_offset(lua_State *L)
 {
 	LocalPlayer *player = getClient(L)->getEnv().getLocalPlayer();
@@ -107,40 +115,38 @@ int LuaCamera::l_get_offset(lua_State *L)
 	return 1;
 }
 
-// get_look_dir(self)
 int LuaCamera::l_get_look_dir(lua_State *L)
 {
-	Camera *camera = getobject(L, 1);
-	if (!camera)
-		return 0;
+	LocalPlayer *player = getClient(L)->getEnv().getLocalPlayer();
+	sanity_check(player);
 
-	push_v3f(L, camera->getDirection());
+	float pitch = -1.0 * player->getPitch() * core::DEGTORAD;
+	float yaw = (player->getYaw() + 90.) * core::DEGTORAD;
+	v3f v(std::cos(pitch) * std::cos(yaw), std::sin(pitch),
+			std::cos(pitch) * std::sin(yaw));
+
+	push_v3f(L, v);
 	return 1;
 }
 
-// get_look_horizontal(self)
-// FIXME: wouldn't localplayer be a better place for this?
 int LuaCamera::l_get_look_horizontal(lua_State *L)
 {
 	LocalPlayer *player = getClient(L)->getEnv().getLocalPlayer();
 	sanity_check(player);
 
-	lua_pushnumber(L, (player->getYaw() + 90.f) * core::DEGTORAD);
+	lua_pushnumber(L, (player->getYaw() + 90.) * core::DEGTORAD);
 	return 1;
 }
 
-// get_look_vertical(self)
-// FIXME: wouldn't localplayer be a better place for this?
 int LuaCamera::l_get_look_vertical(lua_State *L)
 {
 	LocalPlayer *player = getClient(L)->getEnv().getLocalPlayer();
 	sanity_check(player);
 
-	lua_pushnumber(L, -1.0f * player->getPitch() * core::DEGTORAD);
+	lua_pushnumber(L, -1.0 * player->getPitch() * core::DEGTORAD);
 	return 1;
 }
 
-// get_aspect_ratio(self)
 int LuaCamera::l_get_aspect_ratio(lua_State *L)
 {
 	Camera *camera = getobject(L, 1);
@@ -151,6 +157,17 @@ int LuaCamera::l_get_aspect_ratio(lua_State *L)
 	return 1;
 }
 
+LuaCamera *LuaCamera::checkobject(lua_State *L, int narg)
+{
+	luaL_checktype(L, narg, LUA_TUSERDATA);
+
+	void *ud = luaL_checkudata(L, narg, className);
+	if (!ud)
+		luaL_typerror(L, narg, className);
+
+	return *(LuaCamera **)ud;
+}
+
 Camera *LuaCamera::getobject(LuaCamera *ref)
 {
 	return ref->m_camera;
@@ -158,9 +175,12 @@ Camera *LuaCamera::getobject(LuaCamera *ref)
 
 Camera *LuaCamera::getobject(lua_State *L, int narg)
 {
-	LuaCamera *ref = checkObject<LuaCamera>(L, narg);
+	LuaCamera *ref = checkobject(L, narg);
 	assert(ref);
-	return getobject(ref);
+	Camera *camera = getobject(ref);
+	if (!camera)
+		return NULL;
+	return camera;
 }
 
 int LuaCamera::gc_object(lua_State *L)
@@ -172,24 +192,36 @@ int LuaCamera::gc_object(lua_State *L)
 
 void LuaCamera::Register(lua_State *L)
 {
-	static const luaL_Reg metamethods[] = {
-		{"__gc", gc_object},
-		{0, 0}
-	};
-	registerClass<LuaCamera>(L, methods, metamethods);
+	lua_newtable(L);
+	int methodtable = lua_gettop(L);
+	luaL_newmetatable(L, className);
+	int metatable = lua_gettop(L);
+
+	lua_pushliteral(L, "__metatable");
+	lua_pushvalue(L, methodtable);
+	lua_settable(L, metatable);
+
+	lua_pushliteral(L, "__index");
+	lua_pushvalue(L, methodtable);
+	lua_settable(L, metatable);
+
+	lua_pushliteral(L, "__gc");
+	lua_pushcfunction(L, gc_object);
+	lua_settable(L, metatable);
+
+	lua_pop(L, 1);
+
+	luaL_openlib(L, 0, methods, 0);
+	lua_pop(L, 1);
 }
 
 const char LuaCamera::className[] = "Camera";
-const luaL_Reg LuaCamera::methods[] = {
-	luamethod(LuaCamera, set_camera_mode),
-	luamethod(LuaCamera, get_camera_mode),
-	luamethod(LuaCamera, get_fov),
-	luamethod(LuaCamera, get_pos),
-	luamethod(LuaCamera, get_offset),
-	luamethod(LuaCamera, get_look_dir),
-	luamethod(LuaCamera, get_look_vertical),
-	luamethod(LuaCamera, get_look_horizontal),
-	luamethod(LuaCamera, get_aspect_ratio),
+const luaL_Reg LuaCamera::methods[] = {luamethod(LuaCamera, set_camera_mode),
+		luamethod(LuaCamera, get_camera_mode), luamethod(LuaCamera, get_fov),
+		luamethod(LuaCamera, get_pos), luamethod(LuaCamera, get_offset),
+		luamethod(LuaCamera, get_look_dir),
+		luamethod(LuaCamera, get_look_vertical),
+		luamethod(LuaCamera, get_look_horizontal),
+		luamethod(LuaCamera, get_aspect_ratio),
 
-	{0, 0}
-};
+		{0, 0}};

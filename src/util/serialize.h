@@ -1,43 +1,47 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #include "irrlichttypes_bloated.h"
 #include "exceptions.h" // for SerializationError
+#include "debug.h" // for assert
 #include "ieee_float.h"
 
 #include "config.h"
+#if HAVE_ENDIAN_H
+	#ifdef _WIN32
+		#define __BYTE_ORDER 0
+		#define __LITTLE_ENDIAN 0
+		#define __BIG_ENDIAN 1
+	#elif defined(__MACH__) && defined(__APPLE__)
+		#include <machine/endian.h>
+	#elif defined(__FreeBSD__) || defined(__DragonFly__)
+		#include <sys/endian.h>
+	#else
+		#include <endian.h>
+	#endif
+#endif
 #include <cstring> // for memcpy
-#include <cassert>
 #include <iostream>
 #include <string>
-#include <string_view>
-
-/* make sure BYTE_ORDER macros are available */
-#ifdef _WIN32
-	#define BYTE_ORDER 1234
-#elif defined(__MACH__) && defined(__APPLE__)
-	#include <machine/endian.h>
-#elif defined(__FreeBSD__) || defined(__DragonFly__)
-	#include <sys/endian.h>
-#elif HAVE_ENDIAN_H
-	#include <endian.h>
-#else
-	#error "Can't detect endian (missing header)"
-#endif
-#ifndef LITTLE_ENDIAN
-	#define LITTLE_ENDIAN 1234
-#endif
-#ifndef BIG_ENDIAN
-	#define BIG_ENDIAN 4321
-#endif
-#if !defined(BYTE_ORDER) && defined(_BYTE_ORDER)
-	#define BYTE_ORDER _BYTE_ORDER
-#elif !defined(BYTE_ORDER) && defined(__BYTE_ORDER)
-	#define BYTE_ORDER __BYTE_ORDER
-#endif
+#include <vector>
 
 #define FIXEDPOINT_FACTOR 1000.0f
 
@@ -48,8 +52,8 @@
 // not represent the full range, but rather the largest safe range, of values on
 // all supported architectures.  Note: This definition makes assumptions on
 // platform float-to-int conversion behavior.
-static constexpr float F1000_MIN = (s32)((float)(S32_MIN) / FIXEDPOINT_FACTOR);
-static constexpr float F1000_MAX = (s32)((float)(S32_MAX) / FIXEDPOINT_FACTOR);
+#define F1000_MIN ((float)(s32)((-0x7FFFFFFF - 1) / FIXEDPOINT_FACTOR))
+#define F1000_MAX ((float)(s32)((0x7FFFFFFF) / FIXEDPOINT_FACTOR))
 
 #define STRING_MAX_LEN 0xFFFF
 #define WIDE_STRING_MAX_LEN 0xFFFF
@@ -159,7 +163,7 @@ inline void writeU64(u8 *data, u64 i)
 
 inline u8 readU8(const u8 *data)
 {
-	return data[0];
+	return ((u8)data[0] << 0);
 }
 
 inline s8 readS8(const u8 *data)
@@ -276,7 +280,7 @@ inline v3f readV3F32(const u8 *data)
 
 inline void writeU8(u8 *data, u8 i)
 {
-	data[0] = i;
+	data[0] = (i >> 0) & 0xFF;
 }
 
 inline void writeS8(u8 *data, s8 i)
@@ -286,7 +290,7 @@ inline void writeS8(u8 *data, s8 i)
 
 inline void writeS16(u8 *data, s16 i)
 {
-	writeU16(data, (u16)i);
+	writeU16(data, (u16)i); 
 }
 
 inline void writeS32(u8 *data, s32 i)
@@ -435,44 +439,269 @@ MAKE_STREAM_WRITE_FXN(video::SColor, ARGB8, 4);
 //// More serialization stuff
 ////
 
-[[nodiscard]] inline float clampToF1000(float v)
-{
-	return core::clamp(v, F1000_MIN, F1000_MAX);
-}
-
-[[nodiscard]] inline v3f clampToF1000(v3f v)
-{
-	return {clampToF1000(v.X), clampToF1000(v.Y), clampToF1000(v.Z)};
-}
-
 // Creates a string with the length as the first two bytes
-std::string serializeString16(std::string_view plain);
+std::string serializeString(const std::string &plain);
+
+// Creates a string with the length as the first two bytes from wide string
+std::string serializeWideString(const std::wstring &plain);
 
 // Reads a string with the length as the first two bytes
-std::string deSerializeString16(std::istream &is);
+std::string deSerializeString(std::istream &is);
+
+// Reads a wide string with the length as the first two bytes
+std::wstring deSerializeWideString(std::istream &is);
 
 // Creates a string with the length as the first four bytes
-std::string serializeString32(std::string_view plain);
+std::string serializeLongString(const std::string &plain);
 
 // Reads a string with the length as the first four bytes
-std::string deSerializeString32(std::istream &is);
+std::string deSerializeLongString(std::istream &is);
 
 // Creates a string encoded in JSON format (almost equivalent to a C string literal)
-std::string serializeJsonString(std::string_view plain);
+std::string serializeJsonString(const std::string &plain);
 
 // Reads a string encoded in JSON format
 std::string deSerializeJsonString(std::istream &is);
 
 // If the string contains spaces, quotes or control characters, encodes as JSON.
 // Else returns the string unmodified.
-std::string serializeJsonStringIfNeeded(std::string_view s);
+std::string serializeJsonStringIfNeeded(const std::string &s);
 
 // Parses a string serialized by serializeJsonStringIfNeeded.
 std::string deSerializeJsonStringIfNeeded(std::istream &is);
 
-// Serializes an array of strings (max 2^16 chars each)
-// Output is well suited for compression :)
-std::string serializeString16Array(const std::vector<std::string> &array);
+// Creates a string consisting of the hexadecimal representation of `data`
+std::string serializeHexString(const std::string &data, bool insert_spaces=false);
 
-// Deserializes a string array
-std::vector<std::string> deserializeString16Array(std::istream &is);
+// Creates a string containing comma delimited values of a struct whose layout is
+// described by the parameter format
+bool serializeStructToString(std::string *out,
+	std::string format, void *value);
+
+// Reads a comma delimited string of values into a struct whose layout is
+// decribed by the parameter format
+bool deSerializeStringToStruct(std::string valstr,
+	std::string format, void *out, size_t olen);
+
+////
+//// BufReader
+////
+
+#define MAKE_BUFREADER_GETNOEX_FXN(T, N, S) \
+	inline bool get ## N ## NoEx(T *val)    \
+	{                                       \
+		if (pos + S > size)                 \
+			return false;                   \
+		*val = read ## N(data + pos);       \
+		pos += S;                           \
+		return true;                        \
+	}
+
+#define MAKE_BUFREADER_GET_FXN(T, N) \
+	inline T get ## N()              \
+	{                                \
+		T val;                       \
+		if (!get ## N ## NoEx(&val)) \
+			throw SerializationError("Attempted read past end of data"); \
+		return val;                  \
+	}
+
+class BufReader {
+public:
+	BufReader(const u8 *data_, size_t size_) :
+		data(data_),
+		size(size_)
+	{
+	}
+
+	MAKE_BUFREADER_GETNOEX_FXN(u8,    U8,       1);
+	MAKE_BUFREADER_GETNOEX_FXN(u16,   U16,      2);
+	MAKE_BUFREADER_GETNOEX_FXN(u32,   U32,      4);
+	MAKE_BUFREADER_GETNOEX_FXN(u64,   U64,      8);
+	MAKE_BUFREADER_GETNOEX_FXN(s8,    S8,       1);
+	MAKE_BUFREADER_GETNOEX_FXN(s16,   S16,      2);
+	MAKE_BUFREADER_GETNOEX_FXN(s32,   S32,      4);
+	MAKE_BUFREADER_GETNOEX_FXN(s64,   S64,      8);
+	MAKE_BUFREADER_GETNOEX_FXN(f32,   F1000,    4);
+	MAKE_BUFREADER_GETNOEX_FXN(v2s16, V2S16,    4);
+	MAKE_BUFREADER_GETNOEX_FXN(v3s16, V3S16,    6);
+	MAKE_BUFREADER_GETNOEX_FXN(v2s32, V2S32,    8);
+	MAKE_BUFREADER_GETNOEX_FXN(v3s32, V3S32,   12);
+	MAKE_BUFREADER_GETNOEX_FXN(v3f,   V3F1000, 12);
+	MAKE_BUFREADER_GETNOEX_FXN(video::SColor, ARGB8, 4);
+
+	bool getStringNoEx(std::string *val);
+	bool getWideStringNoEx(std::wstring *val);
+	bool getLongStringNoEx(std::string *val);
+	bool getRawDataNoEx(void *data, size_t len);
+
+	MAKE_BUFREADER_GET_FXN(u8,            U8);
+	MAKE_BUFREADER_GET_FXN(u16,           U16);
+	MAKE_BUFREADER_GET_FXN(u32,           U32);
+	MAKE_BUFREADER_GET_FXN(u64,           U64);
+	MAKE_BUFREADER_GET_FXN(s8,            S8);
+	MAKE_BUFREADER_GET_FXN(s16,           S16);
+	MAKE_BUFREADER_GET_FXN(s32,           S32);
+	MAKE_BUFREADER_GET_FXN(s64,           S64);
+	MAKE_BUFREADER_GET_FXN(f32,           F1000);
+	MAKE_BUFREADER_GET_FXN(v2s16,         V2S16);
+	MAKE_BUFREADER_GET_FXN(v3s16,         V3S16);
+	MAKE_BUFREADER_GET_FXN(v2s32,         V2S32);
+	MAKE_BUFREADER_GET_FXN(v3s32,         V3S32);
+	MAKE_BUFREADER_GET_FXN(v3f,           V3F1000);
+	MAKE_BUFREADER_GET_FXN(video::SColor, ARGB8);
+	MAKE_BUFREADER_GET_FXN(std::string,   String);
+	MAKE_BUFREADER_GET_FXN(std::wstring,  WideString);
+	MAKE_BUFREADER_GET_FXN(std::string,   LongString);
+
+	inline void getRawData(void *val, size_t len)
+	{
+		if (!getRawDataNoEx(val, len))
+			throw SerializationError("Attempted read past end of data");
+	}
+
+	inline size_t remaining()
+	{
+		assert(pos <= size);
+		return size - pos;
+	}
+
+	const u8 *data;
+	size_t size;
+	size_t pos = 0;
+};
+
+#undef MAKE_BUFREADER_GET_FXN
+#undef MAKE_BUFREADER_GETNOEX_FXN
+
+
+////
+//// Vector-based write routines
+////
+
+inline void putU8(std::vector<u8> *dest, u8 val)
+{
+	dest->push_back((val >> 0) & 0xFF);
+}
+
+inline void putU16(std::vector<u8> *dest, u16 val)
+{
+	dest->push_back((val >> 8) & 0xFF);
+	dest->push_back((val >> 0) & 0xFF);
+}
+
+inline void putU32(std::vector<u8> *dest, u32 val)
+{
+	dest->push_back((val >> 24) & 0xFF);
+	dest->push_back((val >> 16) & 0xFF);
+	dest->push_back((val >>  8) & 0xFF);
+	dest->push_back((val >>  0) & 0xFF);
+}
+
+inline void putU64(std::vector<u8> *dest, u64 val)
+{
+	dest->push_back((val >> 56) & 0xFF);
+	dest->push_back((val >> 48) & 0xFF);
+	dest->push_back((val >> 40) & 0xFF);
+	dest->push_back((val >> 32) & 0xFF);
+	dest->push_back((val >> 24) & 0xFF);
+	dest->push_back((val >> 16) & 0xFF);
+	dest->push_back((val >>  8) & 0xFF);
+	dest->push_back((val >>  0) & 0xFF);
+}
+
+inline void putS8(std::vector<u8> *dest, s8 val)
+{
+	putU8(dest, val);
+}
+
+inline void putS16(std::vector<u8> *dest, s16 val)
+{
+	putU16(dest, val);
+}
+
+inline void putS32(std::vector<u8> *dest, s32 val)
+{
+	putU32(dest, val);
+}
+
+inline void putS64(std::vector<u8> *dest, s64 val)
+{
+	putU64(dest, val);
+}
+
+inline void putF1000(std::vector<u8> *dest, f32 val)
+{
+	putS32(dest, val * FIXEDPOINT_FACTOR);
+}
+
+inline void putV2S16(std::vector<u8> *dest, v2s16 val)
+{
+	putS16(dest, val.X);
+	putS16(dest, val.Y);
+}
+
+inline void putV3S16(std::vector<u8> *dest, v3s16 val)
+{
+	putS16(dest, val.X);
+	putS16(dest, val.Y);
+	putS16(dest, val.Z);
+}
+
+inline void putV2S32(std::vector<u8> *dest, v2s32 val)
+{
+	putS32(dest, val.X);
+	putS32(dest, val.Y);
+}
+
+inline void putV3S32(std::vector<u8> *dest, v3s32 val)
+{
+	putS32(dest, val.X);
+	putS32(dest, val.Y);
+	putS32(dest, val.Z);
+}
+
+inline void putV3F1000(std::vector<u8> *dest, v3f val)
+{
+	putF1000(dest, val.X);
+	putF1000(dest, val.Y);
+	putF1000(dest, val.Z);
+}
+
+inline void putARGB8(std::vector<u8> *dest, video::SColor val)
+{
+	putU32(dest, val.color);
+}
+
+inline void putString(std::vector<u8> *dest, const std::string &val)
+{
+	if (val.size() > STRING_MAX_LEN)
+		throw SerializationError("String too long");
+
+	putU16(dest, val.size());
+	dest->insert(dest->end(), val.begin(), val.end());
+}
+
+inline void putWideString(std::vector<u8> *dest, const std::wstring &val)
+{
+	if (val.size() > WIDE_STRING_MAX_LEN)
+		throw SerializationError("String too long");
+
+	putU16(dest, val.size());
+	for (size_t i = 0; i != val.size(); i++)
+		putU16(dest, val[i]);
+}
+
+inline void putLongString(std::vector<u8> *dest, const std::string &val)
+{
+	if (val.size() > LONG_STRING_MAX_LEN)
+		throw SerializationError("String too long");
+
+	putU32(dest, val.size());
+	dest->insert(dest->end(), val.begin(), val.end());
+}
+
+inline void putRawData(std::vector<u8> *dest, const void *src, size_t len)
+{
+	dest->insert(dest->end(), (u8 *)src, (u8 *)src + len);
+}

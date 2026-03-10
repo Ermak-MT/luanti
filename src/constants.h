@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
@@ -13,7 +28,7 @@
 */
 
 /*
-    Network Protocol
+    Connection
 */
 
 #define PEER_ID_INEXISTENT 0
@@ -27,21 +42,19 @@
 
 #define CONNECTION_TIMEOUT 30
 
+#define RESEND_TIMEOUT_MIN 0.1
+#define RESEND_TIMEOUT_MAX 3.0
+// resend_timeout = avg_rtt * this
+#define RESEND_TIMEOUT_FACTOR 4
+
 /*
     Server
 */
 
-// Reduces block send rate while player is building
-#define LIMITED_BLOCK_SENDS_FACTOR 0.33f
-// Override for the previous one for blocks that are close by
-#define BLOCK_ALWAYS_SEND_MAX_D 1
-
-/*
-    Client/Server
-*/
-
-// Limit maximum dtime in client/server step(...) and for collision detection
-#define DTIME_LIMIT 2.5f
+// This many blocks are sent when player is building
+#define LIMITED_MAX_SIMULTANEOUS_BLOCK_SENDS 0
+// Override for the previous one when distance of block is very low
+#define BLOCK_SEND_DISABLE_LIMITS_MAX_D 1
 
 /*
     Map-related things
@@ -51,7 +64,7 @@
 // I really don't want to make every algorithm to check if it's going near
 // the limit or not, so this is lower.
 // This is the maximum value the setting map_generation_limit can be
-#define MAX_MAP_GENERATION_LIMIT (31007)
+#define MAX_MAP_GENERATION_LIMIT (31000)
 
 // Size of node in floating-point units
 // The original idea behind this is to disallow plain casts between
@@ -60,15 +73,14 @@
 // Use floatToInt(p, BS) and intToFloat(p, BS).
 #define BS 10.0f
 
-// Dimension of a MapBlock in nodes
+// Dimension of a MapBlock
 #define MAP_BLOCKSIZE 16
+// This makes mesh updates too slow, as many meshes are updated during
+// the main loop (related to TempMods and day/night)
+//#define MAP_BLOCKSIZE 32
 
 // Player step height in nodes
 #define PLAYER_DEFAULT_STEPHEIGHT 0.6f
-
-// Arbitrary volume limit for working with contiguous areas (in nodes)
-// needs to safely fit in the VoxelArea class; used by e.g. VManips
-#define MAX_WORKING_VOLUME 150000000UL
 
 /*
     Old stuff that shouldn't be hardcoded
@@ -77,15 +89,11 @@
 // Size of player's main inventory
 #define PLAYER_INVENTORY_SIZE (8 * 4)
 
-// Default maximum health points of a player
+// Default maximum hit points of a player
 #define PLAYER_MAX_HP_DEFAULT 20
 
 // Default maximal breath of a player
-#define PLAYER_MAX_BREATH_DEFAULT 10
-
-/*
-    Misc
-*/
+#define PLAYER_MAX_BREATH_DEFAULT 11
 
 // Number of different files to try to save a player to if the first fails
 // (because of a case-insensitive filesystem)
@@ -98,10 +106,14 @@
 // the file attempting to ensure a unique filename
 #define SCREENSHOT_MAX_SERIAL_TRIES 1000
 
-#define TTF_DEFAULT_FONT_SIZE (16)
+/*
+    GUI related things
+*/
 
-// Minimum texture size enforced/checked for enabling linear filtering
-// This serves as the minimum for `texture_min_size`.
-// The intent is to ensure that the rendering doesn't turn terribly blurry
-// when filtering is enabled.
-#define TEXTURE_FILTER_MIN_SIZE 192U
+// TODO: implement dpi-based scaling for windows and remove this hack
+#if defined(_WIN32)
+#define TTF_DEFAULT_FONT_SIZE (18)
+#else
+#define TTF_DEFAULT_FONT_SIZE (16)
+#endif
+#define DEFAULT_FONT_SIZE (10)

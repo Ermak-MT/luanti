@@ -35,12 +35,23 @@
 #define NOISE_MAGIC_X    1619
 #define NOISE_MAGIC_Y    31337
 #define NOISE_MAGIC_Z    52591
-// Unsigned magic seed prevents undefined behavior.
-#define NOISE_MAGIC_SEED 1013U
+#define NOISE_MAGIC_SEED 1013
 
-#define myfloor(x) ((x) < 0 ? (int)(x) - 1 : (int)(x))
+typedef float (*Interp2dFxn)(
+		float v00, float v10, float v01, float v11,
+		float x, float y);
 
-const FlagDesc flagdesc_noiseparams[] = {
+typedef float (*Interp3dFxn)(
+		float v000, float v100, float v010, float v110,
+		float v001, float v101, float v011, float v111,
+		float x, float y, float z);
+
+float cos_lookup[16] = {
+	1.0f,  0.9238f,  0.7071f,  0.3826f, .0f, -0.3826f, -0.7071f, -0.9238f,
+	1.0f, -0.9238f, -0.7071f, -0.3826f, .0f,  0.3826f,  0.7071f,  0.9238f
+};
+
+FlagDesc flagdesc_noiseparams[] = {
 	{"defaults",    NOISE_FLAG_DEFAULTS},
 	{"eased",       NOISE_FLAG_EASED},
 	{"absvalue",    NOISE_FLAG_ABSVALUE},
@@ -82,9 +93,6 @@ u32 PcgRandom::range(u32 bound)
 	// If the bound is 0, we cover the whole RNG's range
 	if (bound == 0)
 		return next();
-
-	if (bound == 1)
-		return 0;
 
 	/*
 		This is an optimization of the expression:
@@ -157,18 +165,6 @@ s32 PcgRandom::randNormalDist(s32 min, s32 max, int num_trials)
 	return myround((float)accum / num_trials);
 }
 
-void PcgRandom::getState(u64 state[2]) const
-{
-	state[0] = m_state;
-	state[1] = m_inc;
-}
-
-void PcgRandom::setState(const u64 state[2])
-{
-	m_state = state[0];
-	m_inc = state[1];
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 float noise2d(int x, int y, s32 seed)
@@ -206,38 +202,51 @@ inline float linearInterpolation(float v0, float v1, float t)
 inline float biLinearInterpolation(
 	float v00, float v10,
 	float v01, float v11,
-	float x, float y,
-	bool eased)
+	float x, float y)
 {
-	// Inlining will optimize this branch out when possible
-	if (eased) {
-		x = easeCurve(x);
-		y = easeCurve(y);
-	}
+	float tx = easeCurve(x);
+	float ty = easeCurve(y);
+	float u = linearInterpolation(v00, v10, tx);
+	float v = linearInterpolation(v01, v11, tx);
+	return linearInterpolation(u, v, ty);
+}
+
+
+inline float biLinearInterpolationNoEase(
+	float v00, float v10,
+	float v01, float v11,
+	float x, float y)
+{
 	float u = linearInterpolation(v00, v10, x);
 	float v = linearInterpolation(v01, v11, x);
 	return linearInterpolation(u, v, y);
 }
 
 
-inline float triLinearInterpolation(
+float triLinearInterpolation(
 	float v000, float v100, float v010, float v110,
 	float v001, float v101, float v011, float v111,
-	float x, float y, float z,
-	bool eased)
+	float x, float y, float z)
 {
-	// Inlining will optimize this branch out when possible
-	if (eased) {
-		x = easeCurve(x);
-		y = easeCurve(y);
-		z = easeCurve(z);
-	}
-	float u = biLinearInterpolation(v000, v100, v010, v110, x, y, false);
-	float v = biLinearInterpolation(v001, v101, v011, v111, x, y, false);
+	float tx = easeCurve(x);
+	float ty = easeCurve(y);
+	float tz = easeCurve(z);
+	float u = biLinearInterpolationNoEase(v000, v100, v010, v110, tx, ty);
+	float v = biLinearInterpolationNoEase(v001, v101, v011, v111, tx, ty);
+	return linearInterpolation(u, v, tz);
+}
+
+float triLinearInterpolationNoEase(
+	float v000, float v100, float v010, float v110,
+	float v001, float v101, float v011, float v111,
+	float x, float y, float z)
+{
+	float u = biLinearInterpolationNoEase(v000, v100, v010, v110, x, y);
+	float v = biLinearInterpolationNoEase(v001, v101, v011, v111, x, y);
 	return linearInterpolation(u, v, z);
 }
 
-float noise2d_value(float x, float y, s32 seed, bool eased)
+float noise2d_gradient(float x, float y, s32 seed, bool eased)
 {
 	// Calculate the integer coordinates
 	int x0 = myfloor(x);
@@ -251,11 +260,14 @@ float noise2d_value(float x, float y, s32 seed, bool eased)
 	float v01 = noise2d(x0, y0+1, seed);
 	float v11 = noise2d(x0+1, y0+1, seed);
 	// Interpolate
-	return biLinearInterpolation(v00, v10, v01, v11, xl, yl, eased);
+	if (eased)
+		return biLinearInterpolation(v00, v10, v01, v11, xl, yl);
+
+	return biLinearInterpolationNoEase(v00, v10, v01, v11, xl, yl);
 }
 
 
-float noise3d_value(float x, float y, float z, s32 seed, bool eased)
+float noise3d_gradient(float x, float y, float z, s32 seed, bool eased)
 {
 	// Calculate the integer coordinates
 	int x0 = myfloor(x);
@@ -275,15 +287,21 @@ float noise3d_value(float x, float y, float z, s32 seed, bool eased)
 	float v011 = noise3d(x0,     y0 + 1, z0 + 1, seed);
 	float v111 = noise3d(x0 + 1, y0 + 1, z0 + 1, seed);
 	// Interpolate
-	return triLinearInterpolation(
+	if (eased) {
+		return triLinearInterpolation(
+			v000, v100, v010, v110,
+			v001, v101, v011, v111,
+			xl, yl, zl);
+	}
+
+	return triLinearInterpolationNoEase(
 		v000, v100, v010, v110,
 		v001, v101, v011, v111,
-		xl, yl, zl,
-		eased);
+		xl, yl, zl);
 }
 
 
-float noise2d_fractal(float x, float y, s32 seed,
+float noise2d_perlin(float x, float y, s32 seed,
 	int octaves, float persistence, bool eased)
 {
 	float a = 0;
@@ -291,7 +309,52 @@ float noise2d_fractal(float x, float y, s32 seed,
 	float g = 1.0;
 	for (int i = 0; i < octaves; i++)
 	{
-		a += g * noise2d_value(x * f, y * f, seed + i, eased);
+		a += g * noise2d_gradient(x * f, y * f, seed + i, eased);
+		f *= 2.0;
+		g *= persistence;
+	}
+	return a;
+}
+
+
+float noise2d_perlin_abs(float x, float y, s32 seed,
+	int octaves, float persistence, bool eased)
+{
+	float a = 0;
+	float f = 1.0;
+	float g = 1.0;
+	for (int i = 0; i < octaves; i++) {
+		a += g * std::fabs(noise2d_gradient(x * f, y * f, seed + i, eased));
+		f *= 2.0;
+		g *= persistence;
+	}
+	return a;
+}
+
+
+float noise3d_perlin(float x, float y, float z, s32 seed,
+	int octaves, float persistence, bool eased)
+{
+	float a = 0;
+	float f = 1.0;
+	float g = 1.0;
+	for (int i = 0; i < octaves; i++) {
+		a += g * noise3d_gradient(x * f, y * f, z * f, seed + i, eased);
+		f *= 2.0;
+		g *= persistence;
+	}
+	return a;
+}
+
+
+float noise3d_perlin_abs(float x, float y, float z, s32 seed,
+	int octaves, float persistence, bool eased)
+{
+	float a = 0;
+	float f = 1.0;
+	float g = 1.0;
+	for (int i = 0; i < octaves; i++) {
+		a += g * std::fabs(noise3d_gradient(x * f, y * f, z * f, seed + i, eased));
 		f *= 2.0;
 		g *= persistence;
 	}
@@ -308,10 +371,10 @@ float contour(float v)
 }
 
 
-///////////////////////// [ Fractal value noise ] ////////////////////////////
+///////////////////////// [ New noise ] ////////////////////////////
 
 
-float NoiseFractal2D(const NoiseParams *np, float x, float y, s32 seed)
+float NoisePerlin2D(NoiseParams *np, float x, float y, s32 seed)
 {
 	float a = 0;
 	float f = 1.0;
@@ -322,7 +385,7 @@ float NoiseFractal2D(const NoiseParams *np, float x, float y, s32 seed)
 	seed += np->seed;
 
 	for (size_t i = 0; i < np->octaves; i++) {
-		float noiseval = noise2d_value(x * f, y * f, seed + i,
+		float noiseval = noise2d_gradient(x * f, y * f, seed + i,
 			np->flags & (NOISE_FLAG_DEFAULTS | NOISE_FLAG_EASED));
 
 		if (np->flags & NOISE_FLAG_ABSVALUE)
@@ -337,7 +400,7 @@ float NoiseFractal2D(const NoiseParams *np, float x, float y, s32 seed)
 }
 
 
-float NoiseFractal3D(const NoiseParams *np, float x, float y, float z, s32 seed)
+float NoisePerlin3D(NoiseParams *np, float x, float y, float z, s32 seed)
 {
 	float a = 0;
 	float f = 1.0;
@@ -349,7 +412,7 @@ float NoiseFractal3D(const NoiseParams *np, float x, float y, float z, s32 seed)
 	seed += np->seed;
 
 	for (size_t i = 0; i < np->octaves; i++) {
-		float noiseval = noise3d_value(x * f, y * f, z * f, seed + i,
+		float noiseval = noise3d_gradient(x * f, y * f, z * f, seed + i,
 			np->flags & NOISE_FLAG_EASED);
 
 		if (np->flags & NOISE_FLAG_ABSVALUE)
@@ -364,9 +427,9 @@ float NoiseFractal3D(const NoiseParams *np, float x, float y, float z, s32 seed)
 }
 
 
-Noise::Noise(const NoiseParams *np_, s32 seed, u32 sx, u32 sy, u32 sz)
+Noise::Noise(NoiseParams *np_, s32 seed, u32 sx, u32 sy, u32 sz)
 {
-	np = *np_;
+	memcpy(&np, np_, sizeof(np));
 	this->seed = seed;
 	this->sx   = sx;
 	this->sy   = sy;
@@ -378,7 +441,7 @@ Noise::Noise(const NoiseParams *np_, s32 seed, u32 sx, u32 sy, u32 sz)
 
 Noise::~Noise()
 {
-	delete[] value_buf;
+	delete[] gradient_buf;
 	delete[] persist_buf;
 	delete[] noise_buf;
 	delete[] result;
@@ -397,15 +460,15 @@ void Noise::allocBuffers()
 	this->noise_buf = NULL;
 	resizeNoiseBuf(sz > 1);
 
-	delete[] value_buf;
+	delete[] gradient_buf;
 	delete[] persist_buf;
 	delete[] result;
 
 	try {
 		size_t bufsize = sx * sy * sz;
-		this->persist_buf = NULL;
-		this->value_buf = new float[bufsize];
-		this->result = new float[bufsize];
+		this->persist_buf  = NULL;
+		this->gradient_buf = new float[bufsize];
+		this->result       = new float[bufsize];
 	} catch (std::bad_alloc &e) {
 		throw InvalidNoiseParamsException();
 	}
@@ -493,7 +556,7 @@ void Noise::resizeNoiseBuf(bool is3d)
  * next octave.
  */
 #define idx(x, y) ((y) * nlx + (x))
-void Noise::valueMap2D(
+void Noise::gradientMap2D(
 		float x, float y,
 		float step_x, float step_y,
 		s32 seed)
@@ -504,6 +567,9 @@ void Noise::valueMap2D(
 	s32 x0, y0;
 
 	bool eased = np.flags & (NOISE_FLAG_DEFAULTS | NOISE_FLAG_EASED);
+	Interp2dFxn interpolate = eased ?
+		biLinearInterpolation : biLinearInterpolationNoEase;
+
 	x0 = std::floor(x);
 	y0 = std::floor(y);
 	u = x - (float)x0;
@@ -530,8 +596,7 @@ void Noise::valueMap2D(
 		u = orig_u;
 		noisex = 0;
 		for (i = 0; i != sx; i++) {
-			value_buf[index++] =
-				biLinearInterpolation(v00, v10, v01, v11, u, v, eased);
+			gradient_buf[index++] = interpolate(v00, v10, v01, v11, u, v);
 
 			u += step_x;
 			if (u >= 1.0) {
@@ -555,7 +620,7 @@ void Noise::valueMap2D(
 
 
 #define idx(x, y, z) ((z) * nly * nlx + (y) * nlx + (x))
-void Noise::valueMap3D(
+void Noise::gradientMap3D(
 		float x, float y, float z,
 		float step_x, float step_y, float step_z,
 		s32 seed)
@@ -567,7 +632,8 @@ void Noise::valueMap3D(
 	u32 nlx, nly, nlz;
 	s32 x0, y0, z0;
 
-	bool eased = np.flags & NOISE_FLAG_EASED;
+	Interp3dFxn interpolate = (np.flags & NOISE_FLAG_EASED) ?
+		triLinearInterpolation : triLinearInterpolationNoEase;
 
 	x0 = std::floor(x);
 	y0 = std::floor(y);
@@ -608,11 +674,10 @@ void Noise::valueMap3D(
 			u = orig_u;
 			noisex = 0;
 			for (i = 0; i != sx; i++) {
-				value_buf[index++] = triLinearInterpolation(
+				gradient_buf[index++] = interpolate(
 					v000, v100, v010, v110,
 					v001, v101, v011, v111,
-					u, v, w,
-					eased);
+					u, v, w);
 
 				u += step_x;
 				if (u >= 1.0) {
@@ -646,7 +711,7 @@ void Noise::valueMap3D(
 #undef idx
 
 
-float *Noise::noiseMap2D(float x, float y, float *persistence_map)
+float *Noise::perlinMap2D(float x, float y, float *persistence_map)
 {
 	float f = 1.0, g = 1.0;
 	size_t bufsize = sx * sy;
@@ -664,7 +729,7 @@ float *Noise::noiseMap2D(float x, float y, float *persistence_map)
 	}
 
 	for (size_t oct = 0; oct < np.octaves; oct++) {
-		valueMap2D(x * f, y * f,
+		gradientMap2D(x * f, y * f,
 			f / np.spread.X, f / np.spread.Y,
 			seed + np.seed + oct);
 
@@ -683,7 +748,7 @@ float *Noise::noiseMap2D(float x, float y, float *persistence_map)
 }
 
 
-float *Noise::noiseMap3D(float x, float y, float z, float *persistence_map)
+float *Noise::perlinMap3D(float x, float y, float z, float *persistence_map)
 {
 	float f = 1.0, g = 1.0;
 	size_t bufsize = sx * sy * sz;
@@ -702,7 +767,7 @@ float *Noise::noiseMap3D(float x, float y, float z, float *persistence_map)
 	}
 
 	for (size_t oct = 0; oct < np.octaves; oct++) {
-		valueMap3D(x * f, y * f, z * f,
+		gradientMap3D(x * f, y * f, z * f,
 			f / np.spread.X, f / np.spread.Y, f / np.spread.Z,
 			seed + np.seed + oct);
 
@@ -729,22 +794,22 @@ void Noise::updateResults(float g, float *gmap,
 	if (np.flags & NOISE_FLAG_ABSVALUE) {
 		if (persistence_map) {
 			for (size_t i = 0; i != bufsize; i++) {
-				result[i] += gmap[i] * std::fabs(value_buf[i]);
+				result[i] += gmap[i] * std::fabs(gradient_buf[i]);
 				gmap[i] *= persistence_map[i];
 			}
 		} else {
 			for (size_t i = 0; i != bufsize; i++)
-				result[i] += g * std::fabs(value_buf[i]);
+				result[i] += g * std::fabs(gradient_buf[i]);
 		}
 	} else {
 		if (persistence_map) {
 			for (size_t i = 0; i != bufsize; i++) {
-				result[i] += gmap[i] * value_buf[i];
+				result[i] += gmap[i] * gradient_buf[i];
 				gmap[i] *= persistence_map[i];
 			}
 		} else {
 			for (size_t i = 0; i != bufsize; i++)
-				result[i] += g * value_buf[i];
+				result[i] += g * gradient_buf[i];
 		}
 	}
 }

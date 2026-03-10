@@ -1,17 +1,28 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2015-2020 paramat
-// Copyright (C) 2010-2016 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+/*
+Minetest
+Copyright (C) 2010-2018 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+Copyright (C) 2015-2018 paramat
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #define VMANIP_FLAG_CAVE VOXELFLAG_CHECKED1
 
-typedef u16 biome_t;  // copy from mg_biome.h to avoid an unnecessary include
-
 class GenerateNotifier;
-
-class BiomeGen;
 
 /*
 	CavesNoiseIntersection is a cave digging algorithm that carves smooth,
@@ -29,17 +40,15 @@ class CavesNoiseIntersection
 {
 public:
 	CavesNoiseIntersection(const NodeDefManager *nodedef,
-		BiomeManager *biomemgr, BiomeGen *biomegen, v3s16 chunksize, NoiseParams *np_cave1,
+		BiomeManager *biomemgr, v3s16 chunksize, NoiseParams *np_cave1,
 		NoiseParams *np_cave2, s32 seed, float cave_width);
 	~CavesNoiseIntersection();
 
-	void generateCaves(MMVManip *vm, v3s16 nmin, v3s16 nmax, biome_t *biomemap);
+	void generateCaves(MMVManip *vm, v3s16 nmin, v3s16 nmax, u8 *biomemap);
 
 private:
 	const NodeDefManager *m_ndef;
 	BiomeManager *m_bmgr;
-
-	BiomeGen *m_bmgn;
 
 	// configurable parameters
 	v3s16 m_csize;
@@ -146,7 +155,7 @@ public:
 
 	// ndef is a mandatory parameter.
 	// If gennotify is NULL, generation events are not logged.
-	// If biomegen is NULL, cave liquids have classic behavior.
+	// If biomegen is NULL, cave liquids have classic behaviour.
 	CavesRandomWalk(const NodeDefManager *ndef, GenerateNotifier *gennotify =
 		NULL, s32 seed = 0, int water_level = 1, content_t water_source =
 		CONTENT_IGNORE, content_t lava_source = CONTENT_IGNORE,

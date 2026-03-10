@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "cpp_api/s_nodemeta.h"
 #include "cpp_api/s_internal.h"
@@ -9,7 +24,6 @@
 #include "mapnode.h"
 #include "server.h"
 #include "environment.h"
-#include "inventorymanager.h"
 #include "lua_api/l_item.h"
 
 // Return number of accepted items to be moved
@@ -29,7 +43,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowMove(
 		return 0;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "allow_metadata_inventory_move", &ma.to_inv.p))
 		return count;
 
@@ -44,7 +58,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowMove(
 	PCALL_RES(lua_pcall(L, 7, 1, error_handler));
 	if (!lua_isnumber(L, -1))
 		throw LuaError("allow_metadata_inventory_move should"
-				" return a number. node=" + nodename);
+				" return a number, guilty node: " + nodename);
 	int num = luaL_checkinteger(L, -1);
 	lua_pop(L, 2); // Pop integer and error handler
 	return num;
@@ -67,7 +81,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowPut(
 		return 0;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "allow_metadata_inventory_put", &ma.to_inv.p))
 		return stack.count;
 
@@ -80,7 +94,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowPut(
 	PCALL_RES(lua_pcall(L, 5, 1, error_handler));
 	if(!lua_isnumber(L, -1))
 		throw LuaError("allow_metadata_inventory_put should"
-				" return a number. node=" + nodename);
+				" return a number, guilty node: " + nodename);
 	int num = luaL_checkinteger(L, -1);
 	lua_pop(L, 2); // Pop integer and error handler
 	return num;
@@ -103,7 +117,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowTake(
 		return 0;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "allow_metadata_inventory_take", &ma.from_inv.p))
 		return stack.count;
 
@@ -116,7 +130,7 @@ int ScriptApiNodemeta::nodemeta_inventory_AllowTake(
 	PCALL_RES(lua_pcall(L, 5, 1, error_handler));
 	if (!lua_isnumber(L, -1))
 		throw LuaError("allow_metadata_inventory_take should"
-				" return a number. node=" + nodename);
+				" return a number, guilty node: " + nodename);
 	int num = luaL_checkinteger(L, -1);
 	lua_pop(L, 2); // Pop integer and error handler
 	return num;
@@ -139,7 +153,7 @@ void ScriptApiNodemeta::nodemeta_inventory_OnMove(
 		return;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "on_metadata_inventory_move", &ma.from_inv.p))
 		return;
 
@@ -172,7 +186,7 @@ void ScriptApiNodemeta::nodemeta_inventory_OnPut(
 		return;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "on_metadata_inventory_put", &ma.to_inv.p))
 		return;
 
@@ -203,7 +217,7 @@ void ScriptApiNodemeta::nodemeta_inventory_OnTake(
 		return;
 
 	// Push callback function on stack
-	const auto &nodename = ndef->get(node).name;
+	std::string nodename = ndef->get(node).name;
 	if (!getItemCallback(nodename.c_str(), "on_metadata_inventory_take", &ma.from_inv.p))
 		return;
 

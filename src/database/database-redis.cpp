@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2014 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2014 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "config.h"
 
@@ -11,19 +26,11 @@
 #include "settings.h"
 #include "log.h"
 #include "exceptions.h"
-#include "irrlicht_changes/printing.h"
 #include "util/string.h"
 
 #include <hiredis.h>
 #include <cassert>
 
-/*
- * Redis is not a good fit for Minetest and only still supported for legacy as
- * well as advanced use case reasons, see:
- * <https://github.com/luanti-org/luanti/issues/14822>
- *
- * Do NOT extend this backend with any new functionality.
- */
 
 Database_Redis::Database_Redis(Settings &conf)
 {
@@ -58,9 +65,6 @@ Database_Redis::Database_Redis(Settings &conf)
 		}
 		freeReplyObject(reply);
 	}
-
-	dstream << "Note: When storing data in Redis you need to ensure that eviction"
-		" is disabled, or you risk DATA LOSS." << std::endl;
 }
 
 Database_Redis::~Database_Redis()
@@ -68,8 +72,7 @@ Database_Redis::~Database_Redis()
 	redisFree(ctx);
 }
 
-void Database_Redis::beginSave()
-{
+void Database_Redis::beginSave() {
 	redisReply *reply = static_cast<redisReply *>(redisCommand(ctx, "MULTI"));
 	if (!reply) {
 		throw DatabaseException(std::string(
@@ -78,8 +81,7 @@ void Database_Redis::beginSave()
 	freeReplyObject(reply);
 }
 
-void Database_Redis::endSave()
-{
+void Database_Redis::endSave() {
 	redisReply *reply = static_cast<redisReply *>(redisCommand(ctx, "EXEC"));
 	if (!reply) {
 		throw DatabaseException(std::string(
@@ -88,21 +90,21 @@ void Database_Redis::endSave()
 	freeReplyObject(reply);
 }
 
-bool Database_Redis::saveBlock(const v3s16 &pos, std::string_view data)
+bool Database_Redis::saveBlock(const v3s16 &pos, const std::string &data)
 {
 	std::string tmp = i64tos(getBlockAsInteger(pos));
 
 	redisReply *reply = static_cast<redisReply *>(redisCommand(ctx, "HSET %s %s %b",
-			hash.c_str(), tmp.c_str(), data.data(), data.size()));
+			hash.c_str(), tmp.c_str(), data.c_str(), data.size()));
 	if (!reply) {
 		warningstream << "saveBlock: redis command 'HSET' failed on "
-			"block " << pos << ": " << ctx->errstr << std::endl;
+			"block " << PP(pos) << ": " << ctx->errstr << std::endl;
 		freeReplyObject(reply);
 		return false;
 	}
 
 	if (reply->type == REDIS_REPLY_ERROR) {
-		warningstream << "saveBlock: saving block " << pos
+		warningstream << "saveBlock: saving block " << PP(pos)
 			<< " failed: " << std::string(reply->str, reply->len) << std::endl;
 		freeReplyObject(reply);
 		return false;
@@ -125,26 +127,28 @@ void Database_Redis::loadBlock(const v3s16 &pos, std::string *block)
 
 	switch (reply->type) {
 	case REDIS_REPLY_STRING: {
-		block->assign(reply->str, reply->len);
+		*block = std::string(reply->str, reply->len);
+		// std::string copies the memory so this won't cause any problems
 		freeReplyObject(reply);
 		return;
 	}
 	case REDIS_REPLY_ERROR: {
 		std::string errstr(reply->str, reply->len);
 		freeReplyObject(reply);
-		errorstream << "loadBlock: loading block " << pos
+		errorstream << "loadBlock: loading block " << PP(pos)
 			<< " failed: " << errstr << std::endl;
 		throw DatabaseException(std::string(
 			"Redis command 'HGET %s %s' errored: ") + errstr);
 	}
 	case REDIS_REPLY_NIL: {
-		block->clear();
+		*block = "";
+		// block not found in database
 		freeReplyObject(reply);
 		return;
 	}
 	}
 
-	errorstream << "loadBlock: loading block " << pos
+	errorstream << "loadBlock: loading block " << PP(pos)
 		<< " returned invalid reply type " << reply->type
 		<< ": " << std::string(reply->str, reply->len) << std::endl;
 	freeReplyObject(reply);
@@ -162,7 +166,7 @@ bool Database_Redis::deleteBlock(const v3s16 &pos)
 		throw DatabaseException(std::string(
 			"Redis command 'HDEL %s %s' failed: ") + ctx->errstr);
 	} else if (reply->type == REDIS_REPLY_ERROR) {
-		warningstream << "deleteBlock: deleting block " << pos
+		warningstream << "deleteBlock: deleting block " << PP(pos)
 			<< " failed: " << std::string(reply->str, reply->len) << std::endl;
 		freeReplyObject(reply);
 		return false;

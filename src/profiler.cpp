@@ -1,84 +1,58 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2015 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2015 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "profiler.h"
-
-#include <cstring>
-#include "util/numeric.h"
 #include "porting.h"
 
 static Profiler main_profiler;
 Profiler *g_profiler = &main_profiler;
-
-/*
-	Splits a list into "pages". For example, the list [1,2,3,4,5] split
-	into two pages would be [1,2,3],[4,5]. This function computes the
-	minimum and maximum indices of a single page.
-
-	length: Length of the list that should be split
-	page: Page number, 1 <= page <= pagecount
-	pagecount: The number of pages, >= 1
-	minindex: Receives the minimum index (inclusive).
-	maxindex: Receives the maximum index (exclusive).
-
-	Ensures 0 <= minindex <= maxindex <= length.
-*/
-static void paging(u32 length, u32 page, u32 pagecount, u32 &minindex, u32 &maxindex)
+ScopeProfiler::ScopeProfiler(
+		Profiler *profiler, const std::string &name, ScopeProfilerType type) :
+		m_profiler(profiler),
+		m_name(name), m_type(type)
 {
-	if (length < 1 || pagecount < 1 || page < 1 || page > pagecount) {
-		// Special cases or invalid parameters
-		minindex = maxindex = 0;
-	} else if(pagecount <= length) {
-		// Less pages than entries in the list:
-		// Each page contains at least one entry
-		minindex = (length * (page-1) + (pagecount-1)) / pagecount;
-		maxindex = (length * page + (pagecount-1)) / pagecount;
-	} else {
-		// More pages than entries in the list:
-		// Make sure the empty pages are at the end
-		if (page < length) {
-			minindex = page-1;
-			maxindex = page;
-		} else {
-			minindex = 0;
-			maxindex = 0;
-		}
-	}
+	m_name.append(" [ms]");
+	if (m_profiler)
+		m_timer = new TimeTaker(m_name, nullptr, PRECISION_MILLI);
 }
 
-ScopeProfiler::ScopeProfiler(Profiler *profiler, const std::string &name,
-		ScopeProfilerType type, TimePrecision prec) :
-	m_profiler(profiler),
-	m_name(name), m_type(type), m_precision(prec)
+ScopeProfiler::~ScopeProfiler()
 {
-	m_name.append(" [").append(TimePrecision_units[prec]).append("]");
-	m_time1 = porting::getTime(prec);
-}
-
-void ScopeProfiler::stop() noexcept
-{
-	if (!m_profiler)
+	if (!m_timer)
 		return;
 
-	float duration = porting::getTime(m_precision) - m_time1;
-
-	switch (m_type) {
-	case SPT_ADD:
-		m_profiler->add(m_name, duration);
-		break;
-	case SPT_AVG:
-		m_profiler->avg(m_name, duration);
-		break;
-	case SPT_GRAPH_ADD:
-		m_profiler->graphAdd(m_name, duration);
-		break;
-	case SPT_MAX:
-		m_profiler->max(m_name, duration);
-		break;
+	float duration_ms = m_timer->stop(true);
+	float duration = duration_ms / 1000.0;
+	if (m_profiler) {
+		switch (m_type) {
+		case SPT_ADD:
+			m_profiler->add(m_name, duration);
+			break;
+		case SPT_AVG:
+			m_profiler->avg(m_name, duration);
+			break;
+		case SPT_GRAPH_ADD:
+			m_profiler->graphAdd(m_name, duration);
+			break;
+		}
 	}
-
-	m_profiler = nullptr; // don't stop a second time
+	delete m_timer;
 }
 
 Profiler::Profiler()
@@ -89,68 +63,69 @@ Profiler::Profiler()
 void Profiler::add(const std::string &name, float value)
 {
 	MutexAutoLock lock(m_mutex);
-
-	auto it = m_data.find(name);
-	if (it == m_data.end()) {
-		// mark with special value for checking
-		m_data.emplace(name, DataPair{value, -SPT_ADD});
-	} else {
-		assert(it->second.avgcount == -SPT_ADD);
-		it->second.value += value;
+	{
+		/* No average shall have been used; mark add used as -2 */
+		std::map<std::string, int>::iterator n = m_avgcounts.find(name);
+		if (n == m_avgcounts.end()) {
+			m_avgcounts[name] = -2;
+		} else {
+			if (n->second == -1)
+				n->second = -2;
+			assert(n->second == -2);
+		}
 	}
-}
-
-void Profiler::max(const std::string &name, float value)
-{
-	MutexAutoLock lock(m_mutex);
-
-	auto it = m_data.find(name);
-	if (it == m_data.end()) {
-		// mark with special value for checking
-		m_data.emplace(name, DataPair{value, -SPT_MAX});
-	} else {
-		assert(it->second.avgcount == -SPT_MAX);
-		it->second.value = std::max(value, it->second.value);
+	{
+		std::map<std::string, float>::iterator n = m_data.find(name);
+		if (n == m_data.end())
+			m_data[name] = value;
+		else
+			n->second += value;
 	}
 }
 
 void Profiler::avg(const std::string &name, float value)
 {
 	MutexAutoLock lock(m_mutex);
+	int &count = m_avgcounts[name];
 
-	auto it = m_data.find(name);
-	if (it == m_data.end()) {
-		m_data.emplace(name, DataPair{value, 1});
-	} else {
-		assert(it->second.avgcount >= 0);
-		it->second.value += value;
-		it->second.avgcount++;
-	}
+	assert(count != -2);
+	count = MYMAX(count, 0) + 1;
+	m_data[name] += value;
 }
 
 void Profiler::clear()
 {
 	MutexAutoLock lock(m_mutex);
-	for (auto &it : m_data)
-		it.second.reset();
+	for (auto &it : m_data) {
+		it.second = 0;
+	}
+	m_avgcounts.clear();
 	m_start_time = porting::getTimeMs();
 }
 
 float Profiler::getValue(const std::string &name) const
 {
-	auto it = m_data.find(name);
-	if (it == m_data.end())
-		return 0;
-	return it->second.getValue();
+	auto numerator = m_data.find(name);
+	if (numerator == m_data.end())
+		return 0.f;
+
+	auto denominator = m_avgcounts.find(name);
+	if (denominator != m_avgcounts.end()) {
+		if (denominator->second >= 1)
+			return numerator->second / denominator->second;
+	}
+
+	return numerator->second;
 }
 
 int Profiler::getAvgCount(const std::string &name) const
 {
-	auto it = m_data.find(name);
-	if (it == m_data.end())
-		return 1;
-	int denominator = it->second.avgcount;
-	return denominator >= 1 ? denominator : 1;
+	auto n = m_avgcounts.find(name);
+
+	if (n != m_avgcounts.end() && n->second >= 1)
+		return n->second;
+
+	return 1;
 }
 
 u64 Profiler::getElapsedMs() const
@@ -162,7 +137,7 @@ int Profiler::print(std::ostream &o, u32 page, u32 pagecount)
 {
 	GraphValues values;
 	getPage(values, page, pagecount);
-	char buffer[128];
+	char num_buf[50];
 
 	for (const auto &i : values) {
 		o << "  " << i.first << " ";
@@ -171,18 +146,16 @@ int Profiler::print(std::ostream &o, u32 page, u32 pagecount)
 			continue;
 		}
 
-		{
-			// Padding
-			s32 space = std::max(0, 48 - (s32)i.first.size());
-			memset(buffer, '_', space);
-			buffer[space] = '\0';
-			o << buffer;
+		s32 space = 44 - i.first.size();
+		for (s32 j = 0; j < space; j++) {
+			if ((j & 1) && j < space - 1)
+				o << ".";
+			else
+				o << " ";
 		}
-
-		float rounded = floorf(i.second * 1000.0f) / 1000.0f;
-		porting::mt_snprintf(buffer, sizeof(buffer), "% 5ix % 8g",
-				getAvgCount(i.first), rounded);
-		o << buffer << std::endl;
+		porting::mt_snprintf(num_buf, sizeof(num_buf), "% 4ix % 3g",
+				getAvgCount(i.first), i.second);
+		o << num_buf << std::endl;
 	}
 	return values.size();
 }
@@ -204,6 +177,6 @@ void Profiler::getPage(GraphValues &o, u32 page, u32 pagecount)
 			continue;
 		}
 
-		o[i.first] = i.second.getValue();
+		o[i.first] = i.second / getAvgCount(i.first);
 	}
 }

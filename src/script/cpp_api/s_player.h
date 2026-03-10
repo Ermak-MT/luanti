@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
@@ -13,7 +28,6 @@ struct InventoryLocation;
 struct ItemStack;
 struct ToolCapabilities;
 struct PlayerHPChangeReason;
-class ServerActiveObject;
 
 class ScriptApiPlayer : virtual public ScriptApiBase
 {
@@ -26,18 +40,17 @@ public:
 	bool on_prejoinplayer(const std::string &name, const std::string &ip,
 			std::string *reason);
 	bool can_bypass_userlimit(const std::string &name, const std::string &ip);
-	void on_joinplayer(ServerActiveObject *player, s64 last_login);
+	void on_joinplayer(ServerActiveObject *player);
 	void on_leaveplayer(ServerActiveObject *player, bool timeout);
 	void on_cheat(ServerActiveObject *player, const std::string &cheat_type);
 	bool on_punchplayer(ServerActiveObject *player, ServerActiveObject *hitter,
 			float time_from_last_punch, const ToolCapabilities *toolcap,
-			v3f dir, s32 damage);
-	void on_rightclickplayer(ServerActiveObject *player, ServerActiveObject *clicker);
+			v3f dir, s16 damage);
 	s32 on_player_hpchange(ServerActiveObject *player, s32 hp_change,
 			const PlayerHPChangeReason &reason);
 	void on_playerReceiveFields(ServerActiveObject *player,
 			const std::string &formname, const StringMap &fields);
-	void on_authplayer(const std::string &name, const std::string &ip, bool is_success);
+	void on_auth_failure(const std::string &name, const std::string &ip);
 
 	// Player inventory callbacks
 	// Return number of accepted items to be moved

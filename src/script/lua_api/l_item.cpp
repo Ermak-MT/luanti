@@ -1,40 +1,48 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "lua_api/l_item.h"
 #include "lua_api/l_itemstackmeta.h"
 #include "lua_api/l_internal.h"
+#include "common/c_converter.h"
 #include "common/c_content.h"
-#include "common/c_packer.h"
 #include "itemdef.h"
 #include "nodedef.h"
 #include "server.h"
+#include "content_sao.h"
 #include "inventory.h"
+#include "log.h"
 
 
 // garbage collector
 int LuaItemStack::gc_object(lua_State *L)
 {
 	LuaItemStack *o = *(LuaItemStack **)(lua_touserdata(L, 1));
-	o->drop();
+	delete o;
 	return 0;
-}
-
-// __tostring metamethod
-int LuaItemStack::mt_tostring(lua_State *L)
-{
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
-	std::string itemstring = o->m_stack.getItemString(false);
-	lua_pushfstring(L, "ItemStack(\"%s\")", itemstring.c_str());
-	return 1;
 }
 
 // is_empty(self) -> true/false
 int LuaItemStack::l_is_empty(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushboolean(L, item.empty());
 	return 1;
@@ -44,7 +52,7 @@ int LuaItemStack::l_is_empty(lua_State *L)
 int LuaItemStack::l_get_name(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushstring(L, item.name.c_str());
 	return 1;
@@ -54,7 +62,7 @@ int LuaItemStack::l_get_name(lua_State *L)
 int LuaItemStack::l_set_name(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 
 	bool status = true;
@@ -72,7 +80,7 @@ int LuaItemStack::l_set_name(lua_State *L)
 int LuaItemStack::l_get_count(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushinteger(L, item.count);
 	return 1;
@@ -82,7 +90,7 @@ int LuaItemStack::l_get_count(lua_State *L)
 int LuaItemStack::l_set_count(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 
 	bool status;
@@ -103,7 +111,7 @@ int LuaItemStack::l_set_count(lua_State *L)
 int LuaItemStack::l_get_wear(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushinteger(L, item.wear);
 	return 1;
@@ -113,7 +121,7 @@ int LuaItemStack::l_get_wear(lua_State *L)
 int LuaItemStack::l_set_wear(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 
 	bool status;
@@ -134,8 +142,8 @@ int LuaItemStack::l_set_wear(lua_State *L)
 int LuaItemStack::l_get_meta(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
-	ItemStackMetaRef::create(L, o);
+	LuaItemStack *o = checkobject(L, 1);
+	ItemStackMetaRef::create(L, &o->m_stack);
 	return 1;
 }
 
@@ -144,11 +152,8 @@ int LuaItemStack::l_get_meta(lua_State *L)
 int LuaItemStack::l_get_metadata(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
-
-	log_deprecated(L, "ItemStack:get_metadata is deprecated", 1, true);
-
 	const std::string &value = item.metadata.getString("");
 	lua_pushlstring(L, value.c_str(), value.size());
 	return 1;
@@ -159,10 +164,8 @@ int LuaItemStack::l_get_metadata(lua_State *L)
 int LuaItemStack::l_set_metadata(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
-
-	log_deprecated(L, "ItemStack:set_metadata is deprecated", 1, true);
 
 	size_t len = 0;
 	const char *ptr = luaL_checklstring(L, 2, &len);
@@ -176,18 +179,8 @@ int LuaItemStack::l_set_metadata(lua_State *L)
 int LuaItemStack::l_get_description(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	std::string desc = o->m_stack.getDescription(getGameDef(L)->idef());
-	lua_pushstring(L, desc.c_str());
-	return 1;
-}
-
-// get_short_description(self)
-int LuaItemStack::l_get_short_description(lua_State *L)
-{
-	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
-	std::string desc = o->m_stack.getShortDescription(getGameDef(L)->idef());
 	lua_pushstring(L, desc.c_str());
 	return 1;
 }
@@ -196,7 +189,7 @@ int LuaItemStack::l_get_short_description(lua_State *L)
 int LuaItemStack::l_clear(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	o->m_stack.clear();
 	lua_pushboolean(L, true);
 	return 1;
@@ -206,7 +199,7 @@ int LuaItemStack::l_clear(lua_State *L)
 int LuaItemStack::l_replace(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	o->m_stack = read_item(L, 2, getGameDef(L)->idef());
 	lua_pushboolean(L, true);
 	return 1;
@@ -216,7 +209,7 @@ int LuaItemStack::l_replace(lua_State *L)
 int LuaItemStack::l_to_string(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	std::string itemstring = o->m_stack.getItemString();
 	lua_pushstring(L, itemstring.c_str());
 	return 1;
@@ -226,7 +219,7 @@ int LuaItemStack::l_to_string(lua_State *L)
 int LuaItemStack::l_to_table(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	const ItemStack &item = o->m_stack;
 	if(item.empty())
 	{
@@ -266,7 +259,7 @@ int LuaItemStack::l_to_table(lua_State *L)
 int LuaItemStack::l_get_stack_max(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushinteger(L, item.getStackMax(getGameDef(L)->idef()));
 	return 1;
@@ -276,7 +269,7 @@ int LuaItemStack::l_get_stack_max(lua_State *L)
 int LuaItemStack::l_get_free_space(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	lua_pushinteger(L, item.freeSpace(getGameDef(L)->idef()));
 	return 1;
@@ -287,7 +280,7 @@ int LuaItemStack::l_get_free_space(lua_State *L)
 int LuaItemStack::l_is_known(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	bool is_known = item.isKnown(getGameDef(L)->idef());
 	lua_pushboolean(L, is_known);
@@ -300,7 +293,7 @@ int LuaItemStack::l_is_known(lua_State *L)
 int LuaItemStack::l_get_definition(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 
 	// Get registered_items[name]
@@ -322,7 +315,7 @@ int LuaItemStack::l_get_definition(lua_State *L)
 int LuaItemStack::l_get_tool_capabilities(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	const ToolCapabilities &prop =
 		item.getToolCapabilities(getGameDef(L)->idef());
@@ -331,13 +324,13 @@ int LuaItemStack::l_get_tool_capabilities(lua_State *L)
 }
 
 // add_wear(self, amount) -> true/false
-// The range for "amount" is [0,65536]. Wear is only added if the item
+// The range for "amount" is [0,65535]. Wear is only added if the item
 // is a tool. Adding wear might destroy the item.
 // Returns true if the item is (or was) a tool.
 int LuaItemStack::l_add_wear(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	int amount = lua_tointeger(L, 2);
 	bool result = item.addWear(amount, getGameDef(L)->idef());
@@ -345,47 +338,12 @@ int LuaItemStack::l_add_wear(lua_State *L)
 	return 1;
 }
 
-// add_wear_by_uses(self, max_uses) -> true/false
-// The range for "max_uses" is [0,65536].
-// Adds wear to the item in such a way that, if
-// only this function is called to add wear, the item
-// will be destroyed exactly after `max_uses` times of calling it.
-// No-op if `max_uses` is 0 or item is not a tool.
-// Returns true if the item is (or was) a tool.
-int LuaItemStack::l_add_wear_by_uses(lua_State *L)
-{
-	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
-	ItemStack &item = o->m_stack;
-	u32 max_uses = readParam<int>(L, 2);
-	u32 add_wear = calculateResultWear(max_uses, item.wear);
-	bool result = item.addWear(add_wear, getGameDef(L)->idef());
-	lua_pushboolean(L, result);
-	return 1;
-}
-
-// get_wear_bar_params(self) -> table
-// Returns the effective wear bar parameters.
-// Returns nil if this item has none associated.
-int LuaItemStack::l_get_wear_bar_params(lua_State *L)
-{
-	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
-	ItemStack &item = o->m_stack;
-	auto params = item.getWearBarParams(getGameDef(L)->idef());
-	if (params.has_value()) {
-		push_wear_bar_params(L, *params);
-		return 1;
-	}
-	return 0;
-}
-
 // add_item(self, itemstack or itemstring or table or nil) -> itemstack
 // Returns leftover item stack
 int LuaItemStack::l_add_item(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	ItemStack newitem = read_item(L, -1, getGameDef(L)->idef());
 	ItemStack leftover = item.addItem(newitem, getGameDef(L)->idef());
@@ -399,7 +357,7 @@ int LuaItemStack::l_add_item(lua_State *L)
 int LuaItemStack::l_item_fits(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	ItemStack newitem = read_item(L, 2, getGameDef(L)->idef());
 	ItemStack restitem;
@@ -413,7 +371,7 @@ int LuaItemStack::l_item_fits(lua_State *L)
 int LuaItemStack::l_take_item(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	u32 takecount = 1;
 	if(!lua_isnone(L, 2))
@@ -427,7 +385,7 @@ int LuaItemStack::l_take_item(lua_State *L)
 int LuaItemStack::l_peek_item(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o = checkObject<LuaItemStack>(L, 1);
+	LuaItemStack *o = checkobject(L, 1);
 	ItemStack &item = o->m_stack;
 	u32 peekcount = 1;
 	if(!lua_isnone(L, 2))
@@ -437,41 +395,18 @@ int LuaItemStack::l_peek_item(lua_State *L)
 	return 1;
 }
 
-// equals(self, other) -> bool
-int LuaItemStack::l_equals(lua_State *L)
-{
-	NO_MAP_LOCK_REQUIRED;
-	LuaItemStack *o1 = checkObject<LuaItemStack>(L, 1);
-
-	// checks for non-userdata argument
-	if (!lua_isuserdata(L, 2)) {
-		lua_pushboolean(L, false);
-		return 1;
-	}
-
-	// check that the argument is an ItemStack
-	if (!lua_getmetatable(L, 2)) {
-		lua_pushboolean(L, false);
-		return 1;
-	}
-	lua_getfield(L, LUA_REGISTRYINDEX, className);
-	if (!lua_rawequal(L, -1, -2)) {
-		lua_pushboolean(L, false);
-		return 1;
-	}
-
-	LuaItemStack *o2 = checkObject<LuaItemStack>(L, 2);
-
-	ItemStack &item1 = o1->m_stack;
-	ItemStack &item2 = o2->m_stack;
-
-	lua_pushboolean(L, item1 == item2);
-	return 1;
-}
-
 LuaItemStack::LuaItemStack(const ItemStack &item):
 	m_stack(item)
 {
+}
+
+const ItemStack& LuaItemStack::getItem() const
+{
+	return m_stack;
+}
+ItemStack& LuaItemStack::getItem()
+{
+	return m_stack;
 }
 
 // LuaItemStack(itemstack or itemstring or table or nil)
@@ -488,7 +423,6 @@ int LuaItemStack::create_object(lua_State *L)
 	lua_setmetatable(L, -2);
 	return 1;
 }
-
 // Not callable from Lua
 int LuaItemStack::create(lua_State *L, const ItemStack &item)
 {
@@ -500,34 +434,40 @@ int LuaItemStack::create(lua_State *L, const ItemStack &item)
 	return 1;
 }
 
-void *LuaItemStack::packIn(lua_State *L, int idx)
+LuaItemStack* LuaItemStack::checkobject(lua_State *L, int narg)
 {
-	LuaItemStack *o = checkObject<LuaItemStack>(L, idx);
-	return new ItemStack(o->getItem());
-}
-
-void LuaItemStack::packOut(lua_State *L, void *ptr)
-{
-	ItemStack *stack = reinterpret_cast<ItemStack*>(ptr);
-	if (L)
-		create(L, *stack);
-	delete stack;
+	luaL_checktype(L, narg, LUA_TUSERDATA);
+	void *ud = luaL_checkudata(L, narg, className);
+	if(!ud) luaL_typerror(L, narg, className);
+	return *(LuaItemStack**)ud;  // unbox pointer
 }
 
 void LuaItemStack::Register(lua_State *L)
 {
-	static const luaL_Reg metamethods[] = {
-		{"__tostring", mt_tostring},
-		{"__gc", gc_object},
-		{"__eq", l_equals},
-		{0, 0}
-	};
-	registerClass<LuaItemStack>(L, methods, metamethods);
+	lua_newtable(L);
+	int methodtable = lua_gettop(L);
+	luaL_newmetatable(L, className);
+	int metatable = lua_gettop(L);
 
-	// Can be created from Lua (ItemStack(itemstack or itemstring or table or nil))
+	lua_pushliteral(L, "__metatable");
+	lua_pushvalue(L, methodtable);
+	lua_settable(L, metatable);  // hide metatable from Lua getmetatable()
+
+	lua_pushliteral(L, "__index");
+	lua_pushvalue(L, methodtable);
+	lua_settable(L, metatable);
+
+	lua_pushliteral(L, "__gc");
+	lua_pushcfunction(L, gc_object);
+	lua_settable(L, metatable);
+
+	lua_pop(L, 1);  // drop metatable
+
+	luaL_openlib(L, 0, methods, 0);  // fill methodtable
+	lua_pop(L, 1);  // drop methodtable
+
+	// Can be created from Lua (LuaItemStack(itemstack or itemstring or table or nil))
 	lua_register(L, className, create_object);
-
-	script_register_packer(L, className, packIn, packOut);
 }
 
 const char LuaItemStack::className[] = "ItemStack";
@@ -543,7 +483,6 @@ const luaL_Reg LuaItemStack::methods[] = {
 	luamethod(LuaItemStack, get_metadata),
 	luamethod(LuaItemStack, set_metadata),
 	luamethod(LuaItemStack, get_description),
-	luamethod(LuaItemStack, get_short_description),
 	luamethod(LuaItemStack, clear),
 	luamethod(LuaItemStack, replace),
 	luamethod(LuaItemStack, to_string),
@@ -554,13 +493,10 @@ const luaL_Reg LuaItemStack::methods[] = {
 	luamethod(LuaItemStack, get_definition),
 	luamethod(LuaItemStack, get_tool_capabilities),
 	luamethod(LuaItemStack, add_wear),
-	luamethod(LuaItemStack, add_wear_by_uses),
-	luamethod(LuaItemStack, get_wear_bar_params),
 	luamethod(LuaItemStack, add_item),
 	luamethod(LuaItemStack, item_fits),
 	luamethod(LuaItemStack, take_item),
 	luamethod(LuaItemStack, peek_item),
-	luamethod(LuaItemStack, equals),
 	{0,0}
 };
 
@@ -569,7 +505,7 @@ const luaL_Reg LuaItemStack::methods[] = {
 */
 
 // register_item_raw({lots of stuff})
-int ModApiItem::l_register_item_raw(lua_State *L)
+int ModApiItemMod::l_register_item_raw(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -586,6 +522,7 @@ int ModApiItem::l_register_item_raw(lua_State *L)
 	lua_getfield(L, table, "name");
 	if(lua_isstring(L, -1)){
 		name = readParam<std::string>(L, -1);
+		verbosestream<<"register_item_raw: "<<name<<std::endl;
 	} else {
 		throw LuaError("register_item_raw: name is not defined or not a string");
 	}
@@ -605,7 +542,7 @@ int ModApiItem::l_register_item_raw(lua_State *L)
 		if(def.type == ITEM_NODE)
 			def.node_placement_prediction = name;
 		else
-			def.node_placement_prediction.clear();
+			def.node_placement_prediction = "";
 	}
 
 	// Register item definition
@@ -613,15 +550,11 @@ int ModApiItem::l_register_item_raw(lua_State *L)
 
 	// Read the node definition (content features) and register it
 	if (def.type == ITEM_NODE) {
-		ContentFeatures f;
-		read_content_features(L, f, table);
+		ContentFeatures f = read_content_features(L, table);
 		// when a mod reregisters ignore, only texture changes and such should
 		// be done
 		if (f.name == "ignore")
 			return 0;
-		// This would break everything
-		if (f.name.empty())
-			throw LuaError("Cannot register node with empty name");
 
 		content_t id = ndef->set(f.name, f);
 
@@ -636,7 +569,7 @@ int ModApiItem::l_register_item_raw(lua_State *L)
 }
 
 // unregister_item(name)
-int ModApiItem::l_unregister_item_raw(lua_State *L)
+int ModApiItemMod::l_unregister_item_raw(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string name = luaL_checkstring(L, 1);
@@ -657,7 +590,7 @@ int ModApiItem::l_unregister_item_raw(lua_State *L)
 }
 
 // register_alias_raw(name, convert_to_name)
-int ModApiItem::l_register_alias_raw(lua_State *L)
+int ModApiItemMod::l_register_alias_raw(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string name = luaL_checkstring(L, 1);
@@ -673,63 +606,38 @@ int ModApiItem::l_register_alias_raw(lua_State *L)
 }
 
 // get_content_id(name)
-int ModApiItem::l_get_content_id(lua_State *L)
+int ModApiItemMod::l_get_content_id(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	std::string name = luaL_checkstring(L, 1);
 
-	const IItemDefManager *idef = getGameDef(L)->idef();
-	const NodeDefManager *ndef = getGameDef(L)->ndef();
-
-	// If this is called at mod load time, NodeDefManager isn't aware of
-	// aliases yet, so we need to handle them manually
-	const auto &alias_name = idef->getAlias(name);
-
+	const NodeDefManager *ndef = getGameDef(L)->getNodeDefManager();
 	content_t content_id;
-	if (alias_name != name) {
-		if (!ndef->getId(alias_name, content_id))
-			throw LuaError("Unknown node: " + alias_name +
-					" (from alias " + name + ")");
-	} else if (!ndef->getId(name, content_id)) {
+	if (!ndef->getId(name, content_id))
 		throw LuaError("Unknown node: " + name);
-	}
 
 	lua_pushinteger(L, content_id);
 	return 1; /* number of results */
 }
 
 // get_name_from_content_id(name)
-int ModApiItem::l_get_name_from_content_id(lua_State *L)
+int ModApiItemMod::l_get_name_from_content_id(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 	content_t c = luaL_checkint(L, 1);
 
-	const NodeDefManager *ndef = getGameDef(L)->ndef();
+	const NodeDefManager *ndef = getGameDef(L)->getNodeDefManager();
 	const char *name = ndef->get(c).name.c_str();
 
 	lua_pushstring(L, name);
 	return 1; /* number of results */
 }
 
-void ModApiItem::Initialize(lua_State *L, int top)
+void ModApiItemMod::Initialize(lua_State *L, int top)
 {
 	API_FCT(register_item_raw);
 	API_FCT(unregister_item_raw);
 	API_FCT(register_alias_raw);
-	API_FCT(get_content_id);
-	API_FCT(get_name_from_content_id);
-}
-
-void ModApiItem::InitializeAsync(lua_State *L, int top)
-{
-	// all read-only functions
-	API_FCT(get_content_id);
-	API_FCT(get_name_from_content_id);
-}
-
-void ModApiItem::InitializeClient(lua_State *L, int top)
-{
-	// all read-only functions
 	API_FCT(get_content_id);
 	API_FCT(get_name_from_content_id);
 }

@@ -1,21 +1,34 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2019 EvicenceBKidscode / Pierre-Yves Rollo <dev@pyrollo.com>
+/*
+Minetest
+Copyright (C) 2019 EvicenceBKidscode / Pierre-Yves Rollo <dev@pyrollo.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include <vector>
-#include <list>
-#include <unordered_map>
-#include <string>
-#include <IGUIElement.h>
-#include <IGUIEnvironment.h>
-#include "irr_v3d.h"
+#include "config.h" // for USE_FREETYPE
 
+using namespace irr;
 
 class ISimpleTextureSource;
 class Client;
-class GUIScrollBar;
+
+#if USE_FREETYPE
+#include "irrlicht_changes/CGUITTFont.h"
+#endif
 
 class ParsedText
 {
@@ -85,8 +98,8 @@ public:
 
 		gui::IGUIFont *font;
 
-		video::SColor color;
-		video::SColor hovercolor;
+		irr::video::SColor color;
+		irr::video::SColor hovercolor;
 		bool underline;
 
 		s32 baseline = 0;
@@ -116,7 +129,7 @@ public:
 	s32 margin = 3;
 	ValignType valign = VALIGN_TOP;
 	BackgroundType background_type = BACKGROUND_NONE;
-	video::SColor background_color;
+	irr::video::SColor background_color;
 
 	Tag m_root_tag;
 
@@ -161,7 +174,7 @@ public:
 
 	void place(const core::rect<s32> &dest_rect);
 	inline s32 getHeight() { return m_height; };
-	void draw(const core::rect<s32> &clip_rect,
+	void draw(const core::rect<s32> &dest_rect,
 			const core::position2d<s32> &dest_offset);
 	ParsedText::Element *getElementAt(core::position2d<s32> pos);
 	ParsedText::Tag *m_hovertag;
@@ -174,9 +187,8 @@ protected:
 	};
 
 	ParsedText m_text;
-	Client *m_client; ///< null in the mainmenu
-	ISimpleTextureSource *m_tsrc;
-	gui::IGUIEnvironment *m_guienv;
+	Client *m_client;
+	gui::IGUIEnvironment *m_environment;
 	s32 m_height;
 	s32 m_voffset;
 	std::vector<RectWithMargin> m_floating;
@@ -203,7 +215,7 @@ public:
 
 protected:
 	// GUI members
-	ISimpleTextureSource *m_tsrc;
+	Client *m_client;
 	GUIScrollBar *m_vscrollbar;
 	TextDrawer m_drawer;
 

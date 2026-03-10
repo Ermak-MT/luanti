@@ -1,26 +1,38 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include <utility> // std::move
 #include "irrlichttypes.h"
 #include "threading/thread.h"
 #include "threading/mutex_auto_lock.h"
+#include "porting.h"
+#include "log.h"
 #include "container.h"
 
 template<typename T>
 class MutexedVariable
 {
 public:
-	// default initialization
-	MutexedVariable() {}
-
 	MutexedVariable(const T &value):
-		m_value(value) {}
-	MutexedVariable(T &&value):
-		m_value(std::move(value)) {}
+		m_value(value)
+	{}
 
 	T get()
 	{
@@ -34,14 +46,9 @@ public:
 		m_value = value;
 	}
 
-	void set(T &&value)
-	{
-		MutexAutoLock lock(m_mutex);
-		m_value = std::move(value);
-	}
-
-private:
+	// You pretty surely want to grab the lock when accessing this
 	T m_value;
+private:
 	std::mutex m_mutex;
 };
 
@@ -71,8 +78,6 @@ public:
 template<typename Key, typename T, typename Caller, typename CallerData>
 class GetRequest {
 public:
-	typedef CallerInfo<Caller, CallerData, Key, T> caller_info_type;
-
 	GetRequest() = default;
 	~GetRequest() = default;
 
@@ -81,94 +86,103 @@ public:
 	}
 
 	Key key;
-	std::vector<caller_info_type> callers;
+	std::list<CallerInfo<Caller, CallerData, Key, T> > callers;
 };
 
 /**
  * Notes for RequestQueue usage
  * @param Key unique key to identify a request for a specific resource
- * @param T data passed back to caller
+ * @param T ?
  * @param Caller unique id of calling thread
- * @param CallerData additional data provided by caller
+ * @param CallerData data passed back to caller
  */
 template<typename Key, typename T, typename Caller, typename CallerData>
 class RequestQueue {
 public:
-	typedef GetRequest<Key, T, Caller, CallerData> request_type;
-	typedef GetResult<Key, T, Caller, CallerData> result_type;
-	typedef ResultQueue<Key, T, Caller, CallerData> result_queue_type;
-
-	bool empty() const
+	bool empty()
 	{
 		return m_queue.empty();
 	}
 
 	void add(const Key &key, Caller caller, CallerData callerdata,
-		result_queue_type *dest)
+		ResultQueue<Key, T, Caller, CallerData> *dest)
 	{
+		typename std::deque<GetRequest<Key, T, Caller, CallerData> >::iterator i;
+		typename std::list<CallerInfo<Caller, CallerData, Key, T> >::iterator j;
+
 		{
 			MutexAutoLock lock(m_queue.getMutex());
 
-			for (auto &request : m_queue.getQueue()) {
+			/*
+				If the caller is already on the list, only update CallerData
+			*/
+			for (i = m_queue.getQueue().begin(); i != m_queue.getQueue().end(); ++i) {
+				GetRequest<Key, T, Caller, CallerData> &request = *i;
 				if (request.key != key)
 					continue;
 
-				// If the caller is already on the list, only update CallerData
-				for (auto &ca : request.callers) {
+				for (j = request.callers.begin(); j != request.callers.end(); ++j) {
+					CallerInfo<Caller, CallerData, Key, T> &ca = *j;
 					if (ca.caller == caller) {
 						ca.data = callerdata;
 						return;
 					}
 				}
 
-				// Or add this caller
-				typename request_type::caller_info_type ca;
+				CallerInfo<Caller, CallerData, Key, T> ca;
 				ca.caller = caller;
 				ca.data = callerdata;
 				ca.dest = dest;
-				request.callers.push_back(std::move(ca));
+				request.callers.push_back(ca);
 				return;
 			}
 		}
 
-		// Else add a new request to the queue
-		request_type request;
+		/*
+			Else add a new request to the queue
+		*/
+
+		GetRequest<Key, T, Caller, CallerData> request;
 		request.key = key;
-		typename request_type::caller_info_type ca;
+		CallerInfo<Caller, CallerData, Key, T> ca;
 		ca.caller = caller;
 		ca.data = callerdata;
 		ca.dest = dest;
-		request.callers.push_back(std::move(ca));
+		request.callers.push_back(ca);
 
-		m_queue.push_back(std::move(request));
+		m_queue.push_back(request);
 	}
 
-	request_type pop(unsigned int timeout_ms)
+	GetRequest<Key, T, Caller, CallerData> pop(unsigned int timeout_ms)
 	{
 		return m_queue.pop_front(timeout_ms);
 	}
 
-	request_type pop()
+	GetRequest<Key, T, Caller, CallerData> pop()
 	{
 		return m_queue.pop_frontNoEx();
 	}
 
-	void pushResult(const request_type &req, const T &res)
+	void pushResult(GetRequest<Key, T, Caller, CallerData> req, T res)
 	{
-		for (auto &ca : req.callers) {
-			result_type result;
+		for (typename std::list<CallerInfo<Caller, CallerData, Key, T> >::iterator
+				i = req.callers.begin();
+				i != req.callers.end(); ++i) {
+			CallerInfo<Caller, CallerData, Key, T> &ca = *i;
+
+			GetResult<Key,T,Caller,CallerData> result;
 
 			result.key = req.key;
 			result.item = res;
 			result.caller.first = ca.caller;
 			result.caller.second = ca.data;
 
-			ca.dest->push_back(std::move(result));
+			ca.dest->push_back(result);
 		}
 	}
 
 private:
-	MutexedQueue<request_type> m_queue;
+	MutexedQueue<GetRequest<Key, T, Caller, CallerData> > m_queue;
 };
 
 class UpdateThread : public Thread

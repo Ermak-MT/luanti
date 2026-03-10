@@ -1,7 +1,6 @@
-core.detached_inventories = {}
+-- Minetest: builtin/detached_inventory.lua
 
-local create_detached_inventory_raw = core.create_detached_inventory_raw
-core.create_detached_inventory_raw = nil
+core.detached_inventories = {}
 
 function core.create_detached_inventory(name, callbacks, player_name)
 	local stuff = {}
@@ -16,13 +15,10 @@ function core.create_detached_inventory(name, callbacks, player_name)
 	end
 	stuff.mod_origin = core.get_current_modname() or "??"
 	core.detached_inventories[name] = stuff
-	return create_detached_inventory_raw(name, player_name)
+	return core.create_detached_inventory_raw(name, player_name)
 end
-
-local remove_detached_inventory_raw = core.remove_detached_inventory_raw
-core.remove_detached_inventory_raw = nil
 
 function core.remove_detached_inventory(name)
 	core.detached_inventories[name] = nil
-	return remove_detached_inventory_raw(name)
+	return core.remove_detached_inventory_raw(name)
 end

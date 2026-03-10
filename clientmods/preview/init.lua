@@ -31,9 +31,8 @@ core.after(4, function()
 end)
 
 core.after(1, function()
-	print("armor: " .. dump(core.localplayer:get_armor_groups()))
 	id = core.localplayer:hud_add({
-			type = "text",
+			hud_elem_type = "text",
 			name = "example",
 			number = 0xff0000,
 			position = {x=0, y=1},
@@ -79,7 +78,7 @@ core.register_on_item_use(function(itemstack, pointed_thing)
 		return false
 	end
 
-	local pos = core.camera:get_pos()
+	local pos = vector.add(core.localplayer:get_pos(), core.camera:get_offset())
 	local pos2 = vector.add(pos, vector.multiply(core.camera:get_look_dir(), 100))
 
 	local rc = core.raycast(pos, pos2)
@@ -109,10 +108,6 @@ core.register_on_sending_chat_message(function(message)
 	return false
 end)
 
-core.register_on_chatcommand(function(command, params)
-	print("[PREVIEW] caught command '"..command.."'. Parameters: '"..params.."'")
-end)
-
 -- This is an example function to ensure it's working properly, should be removed before merge
 core.register_on_hp_modification(function(hp)
 	print("[PREVIEW] HP modified " .. hp)
@@ -127,6 +122,19 @@ end)
 core.register_chatcommand("dump", {
 	func = function(param)
 		return true, dump(_G)
+	end,
+})
+
+core.register_chatcommand("colorize_test", {
+	func = function(param)
+		return true, core.colorize("red", param)
+	end,
+})
+
+core.register_chatcommand("test_node", {
+	func = function(param)
+		core.display_chat_message(dump(core.get_node({x=0, y=0, z=0})))
+		core.display_chat_message(dump(core.get_node_or_nil({x=0, y=0, z=0})))
 	end,
 })
 
@@ -149,7 +157,7 @@ end
 core.after(2, function()
 	print("[PREVIEW] loaded " .. modname .. " mod")
 	modstorage:set_string("current_mod", modname)
-	assert(modstorage:get_string("current_mod") == modname)
+	print(modstorage:get_string("current_mod"))
 	preview_minimap()
 end)
 
@@ -165,9 +173,6 @@ core.after(5, function()
 
 	print("[PREVIEW] Find node near: " .. dump(core.find_node_near({x=0, y=20, z=0}, 10,
 		{"group:tree", "default:dirt", "default:stone"})))
-
-	print("[PREVIEW] Settings: preview_csm_test_setting = " ..
-		tostring(core.settings:get_bool("preview_csm_test_setting", false)))
 end)
 
 core.register_on_dignode(function(pos, node)
@@ -179,12 +184,30 @@ end)
 
 core.register_on_punchnode(function(pos, node)
 	print("The local player punched a node!")
-	local itemstack = core.localplayer:get_wielded_item()
+	local itemstack = core.get_wielded_item()
+	--[[
+	-- getters
+	print(dump(itemstack:is_empty()))
+	print(dump(itemstack:get_name()))
+	print(dump(itemstack:get_count()))
+	print(dump(itemstack:get_wear()))
+	print(dump(itemstack:get_meta()))
+	print(dump(itemstack:get_metadata()
+	print(dump(itemstack:is_known()))
+	--print(dump(itemstack:get_definition()))
+	print(dump(itemstack:get_tool_capabilities()))
+	print(dump(itemstack:to_string()))
+	print(dump(itemstack:to_table()))
+	-- setters
+	print(dump(itemstack:set_name("default:dirt")))
+	print(dump(itemstack:set_count("95")))
+	print(dump(itemstack:set_wear(934)))
+	print(dump(itemstack:get_meta()))
+	print(dump(itemstack:get_metadata()))
+	--]]
 	print(dump(itemstack:to_table()))
 	print("pos:" .. dump(pos))
 	print("node:" .. dump(node))
-	local meta = core.get_meta(pos)
-	print("punched meta: " .. (meta and dump(meta:to_table()) or "(missing)"))
 	return false
 end)
 

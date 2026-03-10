@@ -1,10 +1,14 @@
 #!/bin/sh -e
 
-# Split lua_api.md on top level headings
-cat ../lua_api.md | csplit -sz -f docs/section - '/^=/-1' '{*}'
+# Patch Python-Markdown
+MARKDOWN_FILE=$(pip show markdown | awk '/Location/ { print $2 }')/markdown/extensions/codehilite.py
+patch -N -r - $MARKDOWN_FILE lua_highlight.patch || true
+
+# Split lua_api.txt on top level headings
+cat ../lua_api.txt | csplit -sz -f docs/section - '/^=/-1' '{*}'
 
 cat > mkdocs.yml << EOF
-site_name: Luanti API Documentation
+site_name: Minetest API Documentation
 theme:
     name: readthedocs
     highlightjs: False
@@ -14,10 +18,7 @@ extra_css:
 markdown_extensions:
     - toc:
         permalink: True
-    - pymdownx.superfences
-    - pymdownx.highlight:
-        css_class: codehilite
-    - gfm_admonition
+    - codehilite
 plugins:
     - search:
         separator: '[\s\-\.\(]+'

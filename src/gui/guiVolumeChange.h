@@ -19,17 +19,19 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #pragma once
 
+#include "irrlichttypes_extrabloated.h"
 #include "modalMenu.h"
 #include <string>
-
-class ISimpleTextureSource;
 
 class GUIVolumeChange : public GUIModalMenu
 {
 public:
 	GUIVolumeChange(gui::IGUIEnvironment* env,
 			gui::IGUIElement* parent, s32 id,
-			IMenuManager *menumgr, ISimpleTextureSource *tsrc);
+			IMenuManager *menumgr);
+	~GUIVolumeChange();
+
+	void removeChildren();
 	/*
 		Remove and re-add (or reposition) stuff
 	*/
@@ -44,7 +46,4 @@ public:
 protected:
 	std::wstring getLabelByID(s32 id) { return L""; }
 	std::string getNameByID(s32 id) { return ""; }
-
-private:
-	ISimpleTextureSource *m_tsrc;
 };

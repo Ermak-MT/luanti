@@ -33,7 +33,7 @@ local function get_relevant_tables(transient)
 	end
 end
 
-function core.forceload_block(pos, transient, limit)
+function core.forceload_block(pos, transient)
 	-- set changed flag
 	forceload_blocks_changed = true
 
@@ -46,8 +46,7 @@ function core.forceload_block(pos, transient, limit)
 	elseif other_table[hash] ~= nil then
 		relevant_table[hash] = 1
 	else
-		limit = limit or tonumber(core.settings:get("max_forceloaded_blocks")) or 16
-		if limit >= 0 and total_forceloaded >= limit then
+		if total_forceloaded >= (tonumber(core.settings:get("max_forceloaded_blocks")) or 16) then
 			return false
 		end
 		total_forceloaded = total_forceloaded+1
@@ -87,6 +86,12 @@ local function read_file(filename)
 	return core.deserialize(t) or {}
 end
 
+local function write_file(filename, table)
+	local f = io.open(filename, "w")
+	f:write(core.serialize(table))
+	f:close()
+end
+
 blocks_forceloaded = read_file(wpath.."/force_loaded.txt")
 for _, __ in pairs(blocks_forceloaded) do
 	total_forceloaded = total_forceloaded + 1
@@ -101,8 +106,7 @@ end)
 
 -- persists the currently forceloaded blocks to disk
 local function persist_forceloaded_blocks()
-	local data = core.serialize(blocks_forceloaded)
-	core.safe_file_write(wpath.."/force_loaded.txt", data)
+	write_file(wpath.."/force_loaded.txt", blocks_forceloaded)
 end
 
 -- periodical forceload persistence

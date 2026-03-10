@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Update/create luanti po files
+# Update/create minetest po files
 
 # an auxiliary function to abort processing with an optional error
 # message
@@ -13,7 +13,7 @@ abort() {
 # this script is. Relative paths are fine for us so we can just
 # use the following trick (works both for manual invocations and for
 # script found from PATH)
-scriptisin="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+scriptisin="$(dirname "$(which "$0")")"
 
 # The script is executed from the parent of po/, which is also the
 # parent of the script directory and of the src/ directory.
@@ -47,49 +47,33 @@ cd ..
 # First thing first, update the .pot template. We place it in the po/
 # directory at the top level. You a recent enough xgettext that supports
 # --package-name
-potfile=po/luanti.pot
-echo "updating pot"
-xgettext --package-name=luanti \
+potfile=po/minetest.pot
+xgettext --package-name=minetest \
 	--add-comments='~' \
 	--sort-by-file \
 	--add-location=file \
 	--keyword=N_ \
 	--keyword=wgettext \
-	--keyword=fwgettext \
 	--keyword=fgettext \
 	--keyword=fgettext_ne \
-	--keyword=hgettext \
 	--keyword=strgettext \
 	--keyword=wstrgettext \
-	--keyword=core.gettext \
 	--keyword=showTranslatedStatusText \
-	--keyword=fmtgettext \
 	--output $potfile \
 	--from-code=utf-8 \
 	`find src/ -name '*.cpp' -o -name '*.h'` \
 	`find builtin/ -name '*.lua'`
 
-# Gettext collects a huge amount of bogus comments for the string
-# "Available commands: ", and this not once but twice!
-# I couldn't figure out how to avoid that so get rid of them afterwards:
-for i in 1 2; do
-	sed '/^#\. ~= 0\.3$/,/^#: /{ /^#: /!d; }' -i $potfile
-done
-
 # Now iterate on all languages and create the po file if missing, or update it
 # if it exists already
 for lang in $langs ; do # note the missing quotes around $langs
-	pofile=po/$lang/luanti.po
+	pofile=po/$lang/minetest.po
 	if test -e $pofile; then
 		echo "[$lang]: updating strings"
-		# Drop old strings *before* updating such that they can be re-used
-		# until this script is run again.
-		msgattrib --output-file=$pofile --no-obsolete $pofile
-		msgmerge --update --backup=none --sort-by-file $pofile $potfile
+		msgmerge --update --sort-by-file $pofile $potfile
 	else
 		# This will ask for the translator identity
 		echo "[$lang]: NEW strings"
 		msginit --locale=$lang --output-file=$pofile --input=$potfile
 	fi
-
 done

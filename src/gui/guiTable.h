@@ -1,6 +1,21 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
@@ -8,7 +23,9 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <iostream>
 
+#include "irrlichttypes_extrabloated.h"
 #include "guiScrollBar.h"
 
 class ISimpleTextureSource;
@@ -85,7 +102,7 @@ public:
 	void setTextList(const std::vector<std::string> &content,
 			bool transparent);
 
-	/** Set generic table options, columns and content, calculate cell sizes */
+	/* Set generic table options, columns and content */
 	// Adds empty strings to end of content if there is an incomplete row
 	void setTable(const TableOptions &options,
 			const TableColumns &columns,
@@ -106,17 +123,14 @@ public:
 	// Autoscroll to make the selected row fully visible
 	void setSelected(s32 index);
 
-	//! Sets another skin independent font. If this is set to zero, the button uses the font of the skin.
-	virtual void setOverrideFont(gui::IGUIFont *font = nullptr);
-
-	//! Gets the override font (if any)
-	virtual gui::IGUIFont *getOverrideFont() const;
-
 	/* Get selection, scroll position and opened (sub)trees */
 	DynamicData getDynamicData() const;
 
 	/* Set selection, scroll position and opened (sub)trees */
 	void setDynamicData(const DynamicData &dyndata);
+
+	/* Returns "GUITable" */
+	virtual const c8* getTypeName() const;
 
 	/* Must be called when position or size changes */
 	virtual void updateAbsolutePosition();
@@ -146,7 +160,6 @@ protected:
 		video::SColor color;
 		bool color_defined;
 		s32 reported_column;
-		f32 image_scale; // only for "image" type columns
 	};
 
 	struct Row {

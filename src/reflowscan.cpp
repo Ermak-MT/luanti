@@ -1,11 +1,27 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2016 MillersMan <millersman@users.noreply.github.com>
+/*
+Minetest
+Copyright (C) 2016 MillersMan <millersman@users.noreply.github.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "reflowscan.h"
 #include "map.h"
 #include "mapblock.h"
 #include "nodedef.h"
+#include "util/timetaker.h"
 
 
 ReflowScan::ReflowScan(Map *map, const NodeDefManager *ndef) :
@@ -36,7 +52,7 @@ void ReflowScan::scan(MapBlock *block, UniqueQueue<v3s16> *liquid_queue)
 		scanColumn(x, z);
 	}
 
-	// Scan neighboring columns from the nearby blocks as they might contain
+	// Scan neighbouring columns from the nearby blocks as they might contain
 	// liquid nodes that weren't allowed to flow to prevent gaps.
 	for (s16 i = 0; i < MAP_BLOCKSIZE; i++) {
 		scanColumn(i, -1);
@@ -50,7 +66,7 @@ inline MapBlock *ReflowScan::lookupBlock(int x, int y, int z)
 {
 	// Gets the block that contains (x,y,z) relativ to the scanned block.
 	// This uses a lookup as there might be many lookups into the same
-	// neighboring block which makes fetches from Map costly.
+	// neighbouring block which makes fetches from Map costly.
 	int bx = (MAP_BLOCKSIZE + x) / MAP_BLOCKSIZE;
 	int by = (MAP_BLOCKSIZE + y) / MAP_BLOCKSIZE;
 	int bz = (MAP_BLOCKSIZE + z) / MAP_BLOCKSIZE;
@@ -69,12 +85,13 @@ inline MapBlock *ReflowScan::lookupBlock(int x, int y, int z)
 inline bool ReflowScan::isLiquidFlowableTo(int x, int y, int z)
 {
 	// Tests whether (x,y,z) is a node to which liquid might flow.
+	bool valid_position;
 	MapBlock *block = lookupBlock(x, y, z);
 	if (block) {
 		int dx = (MAP_BLOCKSIZE + x) % MAP_BLOCKSIZE;
 		int dy = (MAP_BLOCKSIZE + y) % MAP_BLOCKSIZE;
 		int dz = (MAP_BLOCKSIZE + z) % MAP_BLOCKSIZE;
-		MapNode node = block->getNodeNoCheck(dx, dy, dz);
+		MapNode node = block->getNodeNoCheck(dx, dy, dz, &valid_position);
 		if (node.getContent() != CONTENT_IGNORE) {
 			const ContentFeatures &f = m_ndef->get(node);
 			// NOTE: No need to check for flowing nodes with lower liquid level
@@ -89,7 +106,7 @@ inline bool ReflowScan::isLiquidFlowableTo(int x, int y, int z)
 inline bool ReflowScan::isLiquidHorizontallyFlowable(int x, int y, int z)
 {
 	// Check if the (x,y,z) might spread to one of the horizontally
-	// neighboring nodes
+	// neighbouring nodes
 	return isLiquidFlowableTo(x - 1, y, z) ||
 		isLiquidFlowableTo(x + 1, y, z) ||
 		isLiquidFlowableTo(x, y, z - 1) ||
@@ -98,6 +115,8 @@ inline bool ReflowScan::isLiquidHorizontallyFlowable(int x, int y, int z)
 
 void ReflowScan::scanColumn(int x, int z)
 {
+	bool valid_position;
+
 	// Is the column inside a loaded block?
 	MapBlock *block = lookupBlock(x, 0, z);
 	if (!block)
@@ -110,7 +129,7 @@ void ReflowScan::scanColumn(int x, int z)
 	// Get the state from the node above the scanned block
 	bool was_ignore, was_liquid;
 	if (above) {
-		MapNode node = above->getNodeNoCheck(dx, 0, dz);
+		MapNode node = above->getNodeNoCheck(dx, 0, dz, &valid_position);
 		was_ignore = node.getContent() == CONTENT_IGNORE;
 		was_liquid = m_ndef->get(node).isLiquid();
 	} else {
@@ -120,54 +139,47 @@ void ReflowScan::scanColumn(int x, int z)
 	bool was_checked = false;
 	bool was_pushed = false;
 
-	// if there is no liquid above and the current block is air
-	// we can skip scanning the block
-	if (!was_liquid && block->isAir()) {
-		// continue after the block with air
-		was_ignore = false;
-	} else {
-		// Scan through the whole block
-		for (s16 y = MAP_BLOCKSIZE - 1; y >= 0; y--) {
-			MapNode node = block->getNodeNoCheck(dx, y, dz);
-			const ContentFeatures &f = m_ndef->get(node);
-			bool is_ignore = node.getContent() == CONTENT_IGNORE;
-			bool is_liquid = f.isLiquid();
+	// Scan through the whole block
+	for (s16 y = MAP_BLOCKSIZE - 1; y >= 0; y--) {
+		MapNode node = block->getNodeNoCheck(dx, y, dz, &valid_position);
+		const ContentFeatures &f = m_ndef->get(node);
+		bool is_ignore = node.getContent() == CONTENT_IGNORE;
+		bool is_liquid = f.isLiquid();
 
-			if (is_ignore || was_ignore || is_liquid == was_liquid) {
-				// Neither topmost node of liquid column nor topmost node below column
-				was_checked = false;
-				was_pushed = false;
-			} else if (is_liquid) {
-				// This is the topmost node in the column
-				bool is_pushed = false;
-				if (f.liquid_type == LIQUID_FLOWING ||
-						isLiquidHorizontallyFlowable(x, y, z)) {
-					m_liquid_queue->push_back(m_rel_block_pos + v3s16(x, y, z));
-					is_pushed = true;
-				}
-				// Remember waschecked and waspushed to avoid repeated
-				// checks/pushes in case the column consists of only this node
-				was_checked = true;
-				was_pushed = is_pushed;
-			} else {
-				// This is the topmost node below a liquid column
-				if (!was_pushed && (f.floodable ||
-						(!was_checked && isLiquidHorizontallyFlowable(x, y + 1, z)))) {
-					// Activate the lowest node in the column which is one
-					// node above this one
-					m_liquid_queue->push_back(m_rel_block_pos + v3s16(x, y + 1, z));
-				}
+		if (is_ignore || was_ignore || is_liquid == was_liquid) {
+			// Neither topmost node of liquid column nor topmost node below column
+			was_checked = false;
+			was_pushed = false;
+		} else if (is_liquid) {
+			// This is the topmost node in the column
+			bool is_pushed = false;
+			if (f.liquid_type == LIQUID_FLOWING ||
+					isLiquidHorizontallyFlowable(x, y, z)) {
+				m_liquid_queue->push_back(m_rel_block_pos + v3s16(x, y, z));
+				is_pushed = true;
 			}
-
-			was_liquid = is_liquid;
-			was_ignore = is_ignore;
+			// Remember waschecked and waspushed to avoid repeated
+			// checks/pushes in case the column consists of only this node
+			was_checked = true;
+			was_pushed = is_pushed;
+		} else {
+			// This is the topmost node below a liquid column
+			if (!was_pushed && (f.floodable ||
+					(!was_checked && isLiquidHorizontallyFlowable(x, y + 1, z)))) {
+				// Activate the lowest node in the column which is one
+				// node above this one
+				m_liquid_queue->push_back(m_rel_block_pos + v3s16(x, y + 1, z));
+			}
 		}
+
+		was_liquid = is_liquid;
+		was_ignore = is_ignore;
 	}
 
 	// Check the node below the current block
 	MapBlock *below = lookupBlock(x, -1, z);
 	if (below) {
-		MapNode node = below->getNodeNoCheck(dx, MAP_BLOCKSIZE - 1, dz);
+		MapNode node = below->getNodeNoCheck(dx, MAP_BLOCKSIZE - 1, dz, &valid_position);
 		const ContentFeatures &f = m_ndef->get(node);
 		bool is_ignore = node.getContent() == CONTENT_IGNORE;
 		bool is_liquid = f.isLiquid();

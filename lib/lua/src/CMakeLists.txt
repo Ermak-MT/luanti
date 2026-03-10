@@ -1,8 +1,6 @@
-# Lua core source files.
-file(GLOB LUA_CORE_HDRS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 
+# Lua core source files.
 set(LUA_CORE_SRC
-	${LUA_CORE_HDRS}
 	lapi.c
 	lauxlib.c
 	lbaselib.c
@@ -33,14 +31,24 @@ set(LUA_CORE_SRC
 	lvm.c
 	lzio.c
 )
+set(LUA_LIB_HEADERS
+	lua.h
+	lualib.h
+	lauxlib.h
+	luaconf.h
+)
 
-# Lua library
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}
+		${CMAKE_CURRENT_BINARY_DIR})
+
+# Lua library.
 add_library(lua STATIC ${LUA_CORE_SRC})
 target_link_libraries(lua ${LIBS})
-set_target_properties(lua PROPERTIES
+set(LUA_STATIC_LIB lua)
+set(LUA_LIBS lua)
+
+set_target_properties(${LUA_LIBS} PROPERTIES
 	VERSION ${LUA_VERSION}
 	CLEAN_DIRECT_OUTPUT 1
 )
 
-# Compile code as C++
-set_source_files_properties(${LUA_CORE_SRC} PROPERTIES LANGUAGE CXX)

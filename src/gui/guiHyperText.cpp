@@ -1,30 +1,47 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2019 EvicenceBKidscode / Pierre-Yves Rollo <dev@pyrollo.com>
+/*
+Minetest
+Copyright (C) 2019 EvicenceBKidscode / Pierre-Yves Rollo <dev@pyrollo.com>
 
-#include "guiHyperText.h"
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
+
+#include "IGUIEnvironment.h"
+#include "IGUIElement.h"
 #include "guiScrollBar.h"
+#include "IGUIFont.h"
+#include <vector>
+#include <list>
+#include <unordered_map>
+using namespace irr::gui;
 #include "client/fontengine.h"
-#include "drawItemStack.h"
+#include <SColor.h>
+#include "client/tile.h"
 #include "IVideoDriver.h"
 #include "client/client.h"
 #include "client/renderingengine.h"
-#include "client/texturesource.h"
-#include "inventory.h"
+#include "hud.h"
+#include "guiHyperText.h"
 #include "util/string.h"
-#include "irrlicht_changes/CGUITTFont.h"
-#include "mainmenumanager.h"
-#include "porting.h"
 
-using namespace gui;
-
-static bool check_color(const std::string &str)
+bool check_color(const std::string &str)
 {
-	video::SColor color;
+	irr::video::SColor color;
 	return parseColorString(str, color, false);
 }
 
-static bool check_integer(const std::string &str)
+bool check_integer(const std::string &str)
 {
 	if (str.empty())
 		return false;
@@ -50,15 +67,9 @@ void ParsedText::Element::setStyle(StyleList &style)
 		this->hovercolor = color;
 
 	unsigned int font_size = std::atoi(style["fontsize"].c_str());
-
 	FontMode font_mode = FM_Standard;
 	if (style["fontstyle"] == "mono")
 		font_mode = FM_Mono;
-
-	// hypertext[] only accepts absolute font size values and has a hardcoded
-	// default font size of 16. This is the only way to make hypertext[]
-	// respect font size settings that I can think of.
-	font_size = myround(font_size / 16.0f * g_fontengine->getFontSize(font_mode));
 
 	FontSpec spec(font_size, font_mode,
 		is_yes(style["bold"]), is_yes(style["italic"]));
@@ -279,8 +290,8 @@ void ParsedText::pushChar(wchar_t c)
 		else
 			return;
 	} else {
-		enterElement(ELEMENT_TEXT);
 		m_empty_paragraph = false;
+		enterElement(ELEMENT_TEXT);
 	}
 	m_element->text += c;
 }
@@ -358,7 +369,7 @@ void ParsedText::globalTag(const AttrsList &attrs)
 			else if (attr.second == "middle")
 				valign = ParsedText::VALIGN_MIDDLE;
 		} else if (attr.first == "background") {
-			video::SColor color;
+			irr::video::SColor color;
 			if (attr.second == "none") {
 				background_type = BACKGROUND_NONE;
 			} else if (parseColorString(attr.second, color, false)) {
@@ -407,16 +418,14 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 	AttrsList attrs;
 	while (c != L'>') {
 		std::string attr_name = "";
-		std::wstring attr_val = L"";
+		core::stringw attr_val = L"";
 
-		// Consume whitespace
 		while (c == ' ') {
 			c = text[++cursor];
 			if (c == L'\0' || c == L'=')
 				return 0;
 		}
 
-		// Read attribute name
 		while (c != L' ' && c != L'=') {
 			attr_name += (char)c;
 			c = text[++cursor];
@@ -424,51 +433,28 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 				return 0;
 		}
 
-		// Consume whitespace
 		while (c == L' ') {
 			c = text[++cursor];
 			if (c == L'\0' || c == L'>')
 				return 0;
 		}
 
-		// Skip equals
 		if (c != L'=')
 			return 0;
+
 		c = text[++cursor];
+
 		if (c == L'\0')
 			return 0;
 
-		// Read optional quote
-		wchar_t quote_used = 0;
-		if (c == L'"' || c == L'\'') {
-			quote_used = c;
+		while (c != L'>' && c != L' ') {
+			attr_val += c;
 			c = text[++cursor];
 			if (c == L'\0')
 				return 0;
 		}
 
-		// Read attribute value
-		bool escape = false;
-		while (escape || (quote_used && c != quote_used) || (!quote_used && c != L'>' && c != L' ')) {
-			if (quote_used && !escape && c == L'\\') {
-				escape = true;
-			} else {
-				escape = false;
-				attr_val += c;
-			}
-			c = text[++cursor];
-			if (c == L'\0')
-				return 0;
-		}
-
-		// Remove quote
-		if (quote_used) {
-			if (c != quote_used)
-				return 0;
-			c = text[++cursor];
-		}
-
-		attrs[attr_name] = wide_to_utf8(attr_val);
+		attrs[attr_name] = stringw_to_utf8(attr_val);
 	}
 
 	++cursor; // Last ">"
@@ -584,7 +570,6 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 				return 0;
 			openTag(name, attrs)->style = m_elementtags["action"];
 		}
-		endElement();
 
 	} else if (m_elementtags.count(name)) {
 		if (end) {
@@ -619,7 +604,8 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 
 TextDrawer::TextDrawer(const wchar_t *text, Client *client,
 		gui::IGUIEnvironment *environment, ISimpleTextureSource *tsrc) :
-		m_text(text), m_client(client), m_tsrc(tsrc), m_guienv(environment)
+		m_text(text),
+		m_client(client), m_environment(environment)
 {
 	// Size all elements
 	for (auto &p : m_text.m_paragraphs) {
@@ -630,10 +616,12 @@ TextDrawer::TextDrawer(const wchar_t *text, Client *client,
 				if (e.font) {
 					e.dim.Width = e.font->getDimension(e.text.c_str()).Width;
 					e.dim.Height = e.font->getDimension(L"Yy").Height;
-					if (e.font->getType() == gui::EGFT_CUSTOM) {
-						CGUITTFont *tmp = static_cast<CGUITTFont*>(e.font);
-						e.baseline = e.dim.Height - 1 - tmp->getAscender() / 64;
+#if USE_FREETYPE
+					if (e.font->getType() == irr::gui::EGFT_CUSTOM) {
+						e.baseline = e.dim.Height - 1 -
+							((irr::gui::CGUITTFont *)e.font)->getAscender() / 64;
 					}
+#endif
 				} else {
 					e.dim = {0, 0};
 				}
@@ -650,7 +638,7 @@ TextDrawer::TextDrawer(const wchar_t *text, Client *client,
 
 				if (e.type == ParsedText::ELEMENT_IMAGE) {
 					video::ITexture *texture =
-						m_tsrc->
+						m_client->getTextureSource()->
 							getTexture(stringw_to_utf8(e.text));
 					if (texture)
 						dim = texture->getOriginalSize();
@@ -734,7 +722,7 @@ void TextDrawer::place(const core::rect<s32> &dest_rect)
 		ymargin = p.margin;
 
 		// Place non floating stuff
-		auto el = p.elements.begin();
+		std::vector<ParsedText::Element>::iterator el = p.elements.begin();
 
 		while (el != p.elements.end()) {
 			// Determine line width and y pos
@@ -777,7 +765,7 @@ void TextDrawer::place(const core::rect<s32> &dest_rect)
 										std::max(f.margin, p.margin);
 
 						} else if (f.rect.UpperLeftCorner.X - f.margin <= left &&
-								f.rect.LowerRightCorner.X + f.margin >= right) {
+							 	f.rect.LowerRightCorner.X + f.margin >= right) {
 							// float taking all space
 							left = right;
 						}
@@ -795,7 +783,7 @@ void TextDrawer::place(const core::rect<s32> &dest_rect)
 			u32 charswidth = 0;
 			u32 wordcount = 0;
 
-			// Skip beginning of line separators but include them in height
+			// Skip begining of line separators but include them in height
 			// computation.
 			while (el != p.elements.end() &&
 					el->type == ParsedText::ELEMENT_SEPARATOR) {
@@ -807,8 +795,8 @@ void TextDrawer::place(const core::rect<s32> &dest_rect)
 				el++;
 			}
 
-			auto linestart = el;
-			auto lineend = p.elements.end();
+			std::vector<ParsedText::Element>::iterator linestart = el;
+			std::vector<ParsedText::Element>::iterator lineend = p.elements.end();
 
 			// First pass, find elements fitting into line
 			// (or at least one element)
@@ -929,26 +917,26 @@ void TextDrawer::place(const core::rect<s32> &dest_rect)
 
 // Draw text in a rectangle with a given offset. Items are actually placed in
 // relative (to upper left corner) coordinates.
-void TextDrawer::draw(const core::rect<s32> &clip_rect,
+void TextDrawer::draw(const core::rect<s32> &dest_rect,
 		const core::position2d<s32> &dest_offset)
 {
-	video::IVideoDriver *driver = m_guienv->getVideoDriver();
-	core::position2d<s32> offset = dest_offset;
+	irr::video::IVideoDriver *driver = m_environment->getVideoDriver();
+	core::position2d<s32> offset = dest_rect.UpperLeftCorner + dest_offset;
 	offset.Y += m_voffset;
 
 	if (m_text.background_type == ParsedText::BACKGROUND_COLOR)
-		driver->draw2DRectangle(m_text.background_color, clip_rect);
+		driver->draw2DRectangle(m_text.background_color, dest_rect);
 
 	for (auto &p : m_text.m_paragraphs) {
 		for (auto &el : p.elements) {
 			core::rect<s32> rect(el.pos + offset, el.dim);
-			if (!rect.isRectCollided(clip_rect))
+			if (!rect.isRectCollided(dest_rect))
 				continue;
 
 			switch (el.type) {
 			case ParsedText::ELEMENT_SEPARATOR:
 			case ParsedText::ELEMENT_TEXT: {
-				video::SColor color = el.color;
+				irr::video::SColor color = el.color;
 
 				for (auto tag : el.tags)
 					if (&(*tag) == m_hovertag)
@@ -959,7 +947,7 @@ void TextDrawer::draw(const core::rect<s32> &clip_rect,
 
 				if (el.type == ParsedText::ELEMENT_TEXT)
 					el.font->draw(el.text, rect, color, false, true,
-							&clip_rect);
+							&dest_rect);
 
 				if (el.underline &&  el.drawwidth) {
 					s32 linepos = el.pos.Y + offset.Y +
@@ -970,33 +958,33 @@ void TextDrawer::draw(const core::rect<s32> &clip_rect,
 							el.pos.X + offset.X + el.drawwidth,
 							linepos + (el.baseline >> 3));
 
-					driver->draw2DRectangle(color, linerect, &clip_rect);
+					driver->draw2DRectangle(color, linerect, &dest_rect);
 				}
 			} break;
 
 			case ParsedText::ELEMENT_IMAGE: {
 				video::ITexture *texture =
-						m_tsrc->getTexture(
+						m_client->getTextureSource()->getTexture(
 								stringw_to_utf8(el.text));
 				if (texture != 0)
-					m_guienv->getVideoDriver()->draw2DImage(
+					m_environment->getVideoDriver()->draw2DImage(
 							texture, rect,
-							core::rect<s32>(
+							irr::core::rect<s32>(
 									core::position2d<s32>(0, 0),
 									texture->getOriginalSize()),
-							&clip_rect, 0, true);
+							&dest_rect, 0, true);
 			} break;
 
 			case ParsedText::ELEMENT_ITEM: {
-				if (m_client) {
-					IItemDefManager *idef = m_client->idef();
-					ItemStack item;
-					item.deSerialize(stringw_to_utf8(el.text), idef);
+				IItemDefManager *idef = m_client->idef();
+				ItemStack item;
+				item.deSerialize(stringw_to_utf8(el.text), idef);
 
-					drawItemStack(m_guienv->getVideoDriver(),
-							g_fontengine->getFont(), item, rect, &clip_rect, m_client,
-							IT_ROT_OTHER, el.angle, el.rotation);
-				}
+				drawItemStack(
+						m_environment->getVideoDriver(),
+						g_fontengine->getFont(), item, rect, &dest_rect,
+						m_client, IT_ROT_OTHER, el.angle, el.rotation
+				);
 			} break;
 			}
 		}
@@ -1011,9 +999,13 @@ GUIHyperText::GUIHyperText(const wchar_t *text, IGUIEnvironment *environment,
 		IGUIElement *parent, s32 id, const core::rect<s32> &rectangle,
 		Client *client, ISimpleTextureSource *tsrc) :
 		IGUIElement(EGUIET_ELEMENT, environment, parent, id, rectangle),
-		m_tsrc(tsrc), m_vscrollbar(nullptr),
+		m_client(client), m_vscrollbar(nullptr),
 		m_drawer(text, client, environment, tsrc), m_text_scrollpos(0, 0)
 {
+
+#ifdef _DEBUG
+	setDebugName("GUIHyperText");
+#endif
 
 	IGUISkin *skin = 0;
 	if (Environment)
@@ -1021,11 +1013,11 @@ GUIHyperText::GUIHyperText(const wchar_t *text, IGUIEnvironment *environment,
 
 	m_scrollbar_width = skin ? skin->getSize(gui::EGDS_SCROLLBAR_SIZE) : 16;
 
-	core::rect<s32> rect = core::rect<s32>(
+	core::rect<s32> rect = irr::core::rect<s32>(
 			RelativeRect.getWidth() - m_scrollbar_width, 0,
 			RelativeRect.getWidth(), RelativeRect.getHeight());
 
-	m_vscrollbar = new GUIScrollBar(Environment, this, -1, rect, false, true, tsrc);
+	m_vscrollbar = new GUIScrollBar(Environment, this, -1, rect, false, true);
 	m_vscrollbar->setVisible(false);
 }
 
@@ -1061,10 +1053,14 @@ void GUIHyperText::checkHover(s32 X, s32 Y)
 		}
 	}
 
-	ICursorControl *cursor_control = RenderingEngine::get_raw_device()->getCursorControl();
-
-	if (cursor_control)
-		cursor_control->setActiveIcon(m_drawer.m_hovertag ? gui::ECI_HAND : gui::ECI_NORMAL);
+#ifndef HAVE_TOUCHSCREENGUI
+	if (m_drawer.m_hovertag)
+		RenderingEngine::get_raw_device()->getCursorControl()->setActiveIcon(
+				gui::ECI_HAND);
+	else
+		RenderingEngine::get_raw_device()->getCursorControl()->setActiveIcon(
+				gui::ECI_NORMAL);
+#endif
 }
 
 bool GUIHyperText::OnEvent(const SEvent &event)
@@ -1080,24 +1076,24 @@ bool GUIHyperText::OnEvent(const SEvent &event)
 	if (event.EventType == EET_GUI_EVENT &&
 			event.GUIEvent.EventType == EGET_ELEMENT_LEFT) {
 		m_drawer.m_hovertag = nullptr;
-
-		ICursorControl *cursor_control = RenderingEngine::get_raw_device()->getCursorControl();
-
-		if (cursor_control && cursor_control->isVisible())
+#ifndef HAVE_TOUCHSCREENGUI
+		gui::ICursorControl *cursor_control =
+				RenderingEngine::get_raw_device()->getCursorControl();
+		if (cursor_control->isVisible())
 			cursor_control->setActiveIcon(gui::ECI_NORMAL);
+#endif
 	}
 
 	if (event.EventType == EET_MOUSE_INPUT_EVENT) {
 		if (event.MouseInput.Event == EMIE_MOUSE_MOVED)
 			checkHover(event.MouseInput.X, event.MouseInput.Y);
 
-		if (event.MouseInput.Event == EMIE_MOUSE_WHEEL && m_vscrollbar->isVisible()) {
-			m_vscrollbar->setPosInterpolated(m_vscrollbar->getTargetPos() -
+		if (event.MouseInput.Event == EMIE_MOUSE_WHEEL) {
+			m_vscrollbar->setPos(m_vscrollbar->getPos() -
 					event.MouseInput.Wheel * m_vscrollbar->getSmallStep());
 			m_text_scrollpos.Y = -m_vscrollbar->getPos();
 			m_drawer.draw(m_display_text_rect, m_text_scrollpos);
 			checkHover(event.MouseInput.X, event.MouseInput.Y);
-			return true;
 
 		} else if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN) {
 			ParsedText::Element *element = getElementAt(
@@ -1116,19 +1112,7 @@ bool GUIHyperText::OnEvent(const SEvent &event)
 							newEvent.GUIEvent.EventType = EGET_BUTTON_CLICKED;
 							Parent->OnEvent(newEvent);
 						}
-
-						auto url_it = tag->attrs.find("url");
-						if (url_it != tag->attrs.end()) {
-							if (g_gamecallback) {
-								// in game
-								g_gamecallback->showOpenURLDialog(url_it->second);
-							} else {
-								// main menu
-								porting::open_url(url_it->second);
-							}
-						}
-
-						return true;
+						break;
 					}
 				}
 			}
@@ -1148,16 +1132,8 @@ void GUIHyperText::draw()
 	m_display_text_rect = AbsoluteRect;
 	m_drawer.place(m_display_text_rect);
 
-	// Show a scrollbar if the text overflows vertically
+	// Show scrollbar if text overflow
 	if (m_drawer.getHeight() > m_display_text_rect.getHeight()) {
-		// Showing a scrollbar will reduce the width of the viewport, causing
-		// more text to be wrapped and thus increasing the height of the text.
-		// Therefore, we have to re-layout the text *before* setting the height
-		// of the scrollbar.
-		core::rect<s32> smaller_rect = m_display_text_rect;
-		smaller_rect.LowerRightCorner.X -= m_scrollbar_width;
-		m_drawer.place(smaller_rect);
-
 		m_vscrollbar->setSmallStep(m_display_text_rect.getHeight() * 0.1f);
 		m_vscrollbar->setLargeStep(m_display_text_rect.getHeight() * 0.5f);
 		m_vscrollbar->setMax(m_drawer.getHeight() - m_display_text_rect.getHeight());
@@ -1165,13 +1141,17 @@ void GUIHyperText::draw()
 		m_vscrollbar->setVisible(true);
 
 		m_vscrollbar->setPageSize(s32(m_drawer.getHeight()));
+
+		core::rect<s32> smaller_rect = m_display_text_rect;
+
+		smaller_rect.LowerRightCorner.X -= m_scrollbar_width;
+		m_drawer.place(smaller_rect);
 	} else {
 		m_vscrollbar->setMax(0);
 		m_vscrollbar->setPos(0);
 		m_vscrollbar->setVisible(false);
 	}
-	m_drawer.draw(AbsoluteClippingRect,
-			m_display_text_rect.UpperLeftCorner + m_text_scrollpos);
+	m_drawer.draw(m_display_text_rect, m_text_scrollpos);
 
 	// draw children
 	IGUIElement::draw();

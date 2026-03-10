@@ -1,14 +1,28 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "light.h"
-#include <algorithm>
 #include <cmath>
 #include "util/numeric.h"
 #include "settings.h"
 
-#if CHECK_CLIENT_BUILD()
+#ifndef SERVER
 
 static u8 light_LUT[LIGHT_SUN + 1];
 
@@ -67,11 +81,9 @@ void set_light_table(float gamma)
 		// Strictly speaking, rangelim is not necessary here—if the implementation
 		// is conforming. But we don’t want problems in any case.
 		light_LUT[i] = rangelim((s32)(255.0f * brightness), 0, 255);
-
 		// Ensure light brightens with each level
-		if (i > 0 && light_LUT[i] <= light_LUT[i - 1]) {
-			light_LUT[i] = std::min((u8)254, light_LUT[i - 1]) + 1;
-		}
+		if (i > 1 && light_LUT[i] <= light_LUT[i - 1])
+			light_LUT[i] = light_LUT[i - 1] + 1;
 	}
 }
 

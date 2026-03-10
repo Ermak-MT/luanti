@@ -1,14 +1,26 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "test.h"
 
-#include "constants.h"
 #include "log.h"
 #include "settings.h"
-#include "network/address.h"
-#include "network/networkexceptions.h"
 #include "network/socket.h"
 
 class TestSocket : public TestBase {
@@ -85,11 +97,11 @@ void TestSocket::testIPv4Socket()
 	UASSERT(strncmp(sendbuffer, rcvbuffer, sizeof(sendbuffer)) == 0);
 
 	if (address != Address(0, 0, 0, 0, port)) {
-		UASSERT(sender.getAddress().s_addr ==
-				address.getAddress().s_addr);
+		UASSERT(sender.getAddress().sin_addr.s_addr ==
+				address.getAddress().sin_addr.s_addr);
 	} else {
-		UASSERT(sender.getAddress().s_addr ==
-				Address(127, 0, 0, 1, 0).getAddress().s_addr);
+		UASSERT(sender.getAddress().sin_addr.s_addr ==
+				Address(127, 0, 0, 1, 0).getAddress().sin_addr.s_addr);
 	}
 }
 
@@ -116,7 +128,7 @@ void TestSocket::testIPv6Socket()
 
 	socket6.Bind(address6);
 
-	{
+	try {
 		socket6.Send(Address(&bytes, port), sendbuffer, sizeof(sendbuffer));
 
 		sleep_ms(50);
@@ -130,8 +142,10 @@ void TestSocket::testIPv6Socket()
 		}
 		//FIXME: This fails on some systems
 		UASSERT(strncmp(sendbuffer, rcvbuffer, sizeof(sendbuffer)) == 0);
-
-		UASSERT(memcmp(sender.getAddress6().s6_addr,
-				Address(&bytes, 0).getAddress6().s6_addr, 16) == 0);
+		UASSERT(memcmp(sender.getAddress6().sin6_addr.s6_addr,
+				Address(&bytes, 0).getAddress6().sin6_addr.s6_addr, 16) == 0);
+	} catch (SendFailedException &e) {
+		errorstream << "IPv6 support enabled but not available!"
+					<< std::endl;
 	}
 }

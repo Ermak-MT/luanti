@@ -1,13 +1,30 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #include "irrlichttypes.h"
 #include "irr_v2d.h"
 #include "mapblock.h"
-#include <memory>
+#include <ostream>
+#include <map>
+#include <vector>
 
 class Map;
 class IGameDef;
@@ -26,45 +43,29 @@ public:
 	MapSector(Map *parent, v2s16 pos, IGameDef *gamedef);
 	virtual ~MapSector();
 
-	/// @brief Deletes all blocks (regardless of reference count).
-	/// @param used_count output: number of blocks which were still ref'd
-	void deleteBlocks(size_t *used_count = nullptr);
+	void deleteBlocks();
 
-	v2s16 getPos() const
+	v2s16 getPos()
 	{
 		return m_pos;
 	}
 
-	MapBlock *getBlockNoCreateNoEx(s16 y);
-	std::unique_ptr<MapBlock> createBlankBlockNoInsert(s16 y);
-	MapBlock *createBlankBlock(s16 y);
+	MapBlock * getBlockNoCreateNoEx(s16 y);
+	MapBlock * createBlankBlockNoInsert(s16 y);
+	MapBlock * createBlankBlock(s16 y);
 
-	void insertBlock(std::unique_ptr<MapBlock> block);
+	void insertBlock(MapBlock *block);
 
 	void deleteBlock(MapBlock *block);
 
-	// Remove a block from the map and the sector without deleting it
-	// Returns an owning ptr to block.
-	std::unique_ptr<MapBlock> detachBlock(MapBlock *block);
-
-	// This makes a copy of the internal collection.
-	// Prefer getBlocks() if possible.
 	void getBlocks(MapBlockVect &dest);
 
-	// Get access to the internal collection
-	// This is explicitly only allowed on a const object since modifying anything while iterating is unsafe.
-	// The caller needs to make sure that this does not happen.
-	const auto &getBlocks() const { return m_blocks; }
-	const auto &getBlocks() = delete;
-
 	bool empty() const { return m_blocks.empty(); }
-
-	size_t size() const { return m_blocks.size(); }
 
 protected:
 
 	// The pile of MapBlocks
-	std::unordered_map<s16, std::unique_ptr<MapBlock>> m_blocks;
+	std::unordered_map<s16, MapBlock*> m_blocks;
 
 	Map *m_parent;
 	// Position on parent (in MapBlock widths)

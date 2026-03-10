@@ -1,9 +1,23 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 sapier
+/*
+ Minetest
+ Copyright (C) 2013 sapier
+
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Lesser General Public License for more details.
+
+ You should have received a copy of the GNU Lesser General Public License along
+ with this program; if not, write to the Free Software Foundation, Inc.,
+ 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "guiPathSelectMenu.h"
-#include "guiFormSpecMenu.h" //required because of TextDest only !!!
 
 GUIFileSelectMenu::GUIFileSelectMenu(gui::IGUIEnvironment* env,
 		gui::IGUIElement* parent, s32 id, IMenuManager *menumgr,
@@ -18,12 +32,13 @@ GUIFileSelectMenu::GUIFileSelectMenu(gui::IGUIEnvironment* env,
 
 GUIFileSelectMenu::~GUIFileSelectMenu()
 {
+	removeChildren();
 	setlocale(LC_NUMERIC, "C");
 }
 
 void GUIFileSelectMenu::regenerateGui(v2u32 screensize)
 {
-	removeAllChildren();
+	removeChildren();
 	m_fileOpenDialog = 0;
 
 	core::dimension2du size(600 * m_gui_scale, 400 * m_gui_scale);
@@ -74,7 +89,7 @@ void GUIFileSelectMenu::acceptInput()
 
 bool GUIFileSelectMenu::OnEvent(const SEvent &event)
 {
-	if (event.EventType == EET_GUI_EVENT) {
+	if (event.EventType == irr::EET_GUI_EVENT) {
 		switch (event.GUIEvent.EventType) {
 		case gui::EGET_ELEMENT_CLOSED:
 		case gui::EGET_FILE_CHOOSE_DIALOG_CANCELLED:

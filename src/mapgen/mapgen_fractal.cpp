@@ -1,15 +1,32 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2015-2019 paramat
-// Copyright (C) 2015-2016 kwolekr, Ryan Kwolek
+/*
+Minetest
+Copyright (C) 2015-2019 paramat
+Copyright (C) 2015-2016 kwolekr, Ryan Kwolek
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 
 #include "mapgen.h"
 #include <cmath>
 #include "voxel.h"
 #include "noise.h"
+#include "mapblock.h"
 #include "mapnode.h"
 #include "map.h"
+#include "content_sao.h"
 #include "nodedef.h"
 #include "voxelalgorithms.h"
 //#include "profiler.h" // For TimeTaker
@@ -23,7 +40,7 @@
 #include "mapgen_fractal.h"
 
 
-const FlagDesc flagdesc_mapgen_fractal[] = {
+FlagDesc flagdesc_mapgen_fractal[] = {
 	{"terrain", MGFRACTAL_TERRAIN},
 	{NULL,      0}
 };
@@ -31,7 +48,7 @@ const FlagDesc flagdesc_mapgen_fractal[] = {
 ///////////////////////////////////////////////////////////////////////////////////////
 
 
-MapgenFractal::MapgenFractal(MapgenFractalParams *params, EmergeParams *emerge)
+MapgenFractal::MapgenFractal(MapgenFractalParams *params, EmergeManager *emerge)
 	: MapgenBasic(MAPGEN_FRACTAL, params, emerge)
 {
 	spflags            = params->spflags;
@@ -102,17 +119,8 @@ void MapgenFractalParams::readParams(const Settings *settings)
 	settings->getS16NoEx("mgfractal_dungeon_ymax",         dungeon_ymax);
 	settings->getU16NoEx("mgfractal_fractal",              fractal);
 	settings->getU16NoEx("mgfractal_iterations",           iterations);
-
-	std::optional<v3f> mgfractal_scale;
-	if (settings->getV3FNoEx("mgfractal_scale", mgfractal_scale) && mgfractal_scale.has_value()) {
-		scale = *mgfractal_scale;
-	}
-
-	std::optional<v3f> mgfractal_offset;
-	if (settings->getV3FNoEx("mgfractal_offset", mgfractal_offset) && mgfractal_offset.has_value()) {
-		offset = *mgfractal_offset;
-	}
-
+	settings->getV3FNoEx("mgfractal_scale",                scale);
+	settings->getV3FNoEx("mgfractal_offset",               offset);
 	settings->getFloatNoEx("mgfractal_slice_w",            slice_w);
 	settings->getFloatNoEx("mgfractal_julia_x",            julia_x);
 	settings->getFloatNoEx("mgfractal_julia_y",            julia_y);
@@ -124,7 +132,6 @@ void MapgenFractalParams::readParams(const Settings *settings)
 	settings->getNoiseParams("mgfractal_np_cave1",        np_cave1);
 	settings->getNoiseParams("mgfractal_np_cave2",        np_cave2);
 	settings->getNoiseParams("mgfractal_np_dungeons",     np_dungeons);
-	iterations = std::max<u16>(iterations, 1);
 }
 
 
@@ -176,7 +183,7 @@ int MapgenFractal::getSpawnLevelAtPoint(v2s16 p)
 
 	// If terrain present, don't start search below terrain or water level
 	if (noise_seabed) {
-		s16 seabed_level = NoiseFractal2D(&noise_seabed->np, p.X, p.Y, seed);
+		s16 seabed_level = NoisePerlin2D(&noise_seabed->np, p.X, p.Y, seed);
 		search_start = MYMAX(search_start, MYMAX(seabed_level, water_level));
 	}
 
@@ -203,6 +210,12 @@ void MapgenFractal::makeChunk(BlockMakeData *data)
 	// Pre-conditions
 	assert(data->vmanip);
 	assert(data->nodedef);
+	assert(data->blockpos_requested.X >= data->blockpos_min.X &&
+		data->blockpos_requested.Y >= data->blockpos_min.Y &&
+		data->blockpos_requested.Z >= data->blockpos_min.Z);
+	assert(data->blockpos_requested.X <= data->blockpos_max.X &&
+		data->blockpos_requested.Y <= data->blockpos_max.Y &&
+		data->blockpos_requested.Z <= data->blockpos_max.Z);
 
 	//TimeTaker t("makeChunk");
 
@@ -238,8 +251,7 @@ void MapgenFractal::makeChunk(BlockMakeData *data)
 	}
 
 	// Generate the registered ores
-	if (flags & MG_ORES)
-		m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
+	m_emerge->oremgr->placeAllOres(this, blockseed, node_min, node_max);
 
 	// Generate dungeons
 	if (flags & MG_DUNGEONS)
@@ -408,7 +420,7 @@ s16 MapgenFractal::generateTerrain()
 	u32 index2d = 0;
 
 	if (noise_seabed)
-		noise_seabed->noiseMap2D(node_min.X, node_min.Z);
+		noise_seabed->perlinMap2D(node_min.X, node_min.Z);
 
 	for (s16 z = node_min.Z; z <= node_max.Z; z++) {
 		for (s16 y = node_min.Y - 1; y <= node_max.Y + 1; y++) {

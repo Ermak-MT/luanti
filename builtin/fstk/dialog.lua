@@ -1,6 +1,19 @@
--- Luanti
--- Copyright (C) 2014 sapier
--- SPDX-License-Identifier: LGPL-2.1-or-later
+--Minetest
+--Copyright (C) 2014 sapier
+--
+--This program is free software; you can redistribute it and/or modify
+--it under the terms of the GNU Lesser General Public License as published by
+--the Free Software Foundation; either version 2.1 of the License, or
+--(at your option) any later version.
+--
+--this program is distributed in the hope that it will be useful,
+--but WITHOUT ANY WARRANTY; without even the implied warranty of
+--MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+--GNU Lesser General Public License for more details.
+--
+--You should have received a copy of the GNU Lesser General Public License along
+--with this program; if not, write to the Free Software Foundation, Inc.,
+--51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 local function dialog_event_handler(self,event)
 	if self.user_eventhandler == nil or
@@ -25,18 +38,8 @@ local dialog_metatable = {
 	handle_events  = function(self,event)
 				if not self.hidden then return self.eventhandler(self,event) end
 			end,
-	hide = function(self)
-		if not self.hidden then
-			self.hidden = true
-			self.eventhandler(self, "DialogHide")
-		end
-	end,
-	show = function(self)
-		if self.hidden then
-			self.hidden = false
-			self.eventhandler(self, "DialogShow")
-		end
-	end,
+	hide = function(self) self.hidden = true end,
+	show = function(self) self.hidden = false end,
 	delete = function(self)
 			if self.parent ~= nil then
 				self.parent:show()
@@ -63,20 +66,4 @@ function dialog_create(name,get_formspec,buttonhandler,eventhandler)
 
 	ui.add(self)
 	return self
-end
-
--- "message" must already be formspec-escaped, e.g. via fgettext or
--- core.formspec_escape.
-function messagebox(name, message)
-	return dialog_create(name,
-			function()
-				return ui.get_message_formspec("", message, "ok")
-			end,
-			function(this, fields)
-				if fields.ok then
-					this:delete()
-					return true
-				end
-			end,
-			nil)
 end

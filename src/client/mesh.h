@@ -1,29 +1,32 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include "irrlichttypes_bloated.h"
-
-namespace scene {
-	class IAnimatedMesh;
-	class IMesh;
-	class IMeshBuffer;
-	struct SMesh;
-}
-
-namespace video {
-	class SMaterialLayer;
-	class SColor;
-}
-
+#include "irrlichttypes_extrabloated.h"
+#include "nodedef.h"
 
 /*!
  * Applies shading to a color based on the surface's
  * normal vector.
  */
-void applyFacesShading(video::SColor &color, const v3f normal);
+void applyFacesShading(video::SColor &color, const v3f &normal);
 
 /*
 	Create a new cube mesh.
@@ -48,12 +51,17 @@ void translateMesh(scene::IMesh *mesh, v3f vec);
 /*!
  * Sets a constant color for all vertices in the mesh buffer.
  */
-void setMeshBufferColor(scene::IMeshBuffer *buf, const video::SColor color);
+void setMeshBufferColor(scene::IMeshBuffer *buf, const video::SColor &color);
 
 /*
 	Set a constant color for all vertices in the mesh
 */
-void setMeshColor(scene::IMesh *mesh, const video::SColor color);
+void setMeshColor(scene::IMesh *mesh, const video::SColor &color);
+
+/*
+	Set a constant color for an animated mesh
+*/
+void setAnimatedMeshColor(scene::IAnimatedMeshSceneNode *node, const video::SColor &color);
 
 /*!
  * Overwrites the color of a mesh buffer.
@@ -79,7 +87,7 @@ void setMeshColorByNormal(scene::IMesh *mesh, const v3f &normal,
 	Rotate the mesh by 6d facedir value.
 	Method only for meshnodes, not suitable for entities.
 */
-void rotateMeshBy6dFacedir(scene::IMesh *mesh, u8 facedir);
+void rotateMeshBy6dFacedir(scene::IMesh *mesh, int facedir);
 
 /*
 	Rotate the mesh around the axis and given angle in degrees.
@@ -94,8 +102,10 @@ void rotateMeshYZby (scene::IMesh *mesh, f64 degrees);
  */
 scene::IMeshBuffer* cloneMeshBuffer(scene::IMeshBuffer *mesh_buffer);
 
-/// Clone a mesh. For an animated mesh, this will clone the static pose.
-scene::SMesh* cloneStaticMesh(scene::IMesh *src_mesh);
+/*
+	Clone the mesh.
+*/
+scene::SMesh* cloneMesh(scene::IMesh *src_mesh);
 
 /*
 	Convert nodeboxes to mesh. Each tile goes into a different buffer.
@@ -112,14 +122,8 @@ scene::IMesh* convertNodeboxesToMesh(const std::vector<aabb3f> &boxes,
 void recalculateBoundingBox(scene::IMesh *src_mesh);
 
 /*
-	Check if mesh has valid normals and return true if it does.
-	We assume normal to be valid when it's 0 < length < Inf. and not NaN
- */
-bool checkMeshNormals(scene::IMesh *mesh);
-
-/*
-	Set the MinFilter, MagFilter and AnisotropicFilter properties of a texture
-	layer according to the three relevant boolean values found in the Minetest
-	settings.
+	Vertex cache optimization according to the Forsyth paper:
+	http://home.comcast.net/~tom_forsyth/papers/fast_vert_cache_opt.html
+	Ported from irrlicht 1.8
 */
-void setMaterialFilters(video::SMaterialLayer &tex, bool bilinear, bool trilinear, bool anisotropic);
+scene::IMesh* createForsythOptimizedMesh(const scene::IMesh *mesh);

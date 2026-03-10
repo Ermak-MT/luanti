@@ -1,15 +1,30 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
-#include "gamedef.h"
-
 #include <string>
+#include <iostream>
 #include <vector>
-
-struct ItemStack;
+#include <utility>
+#include "gamedef.h"
+#include "inventory.h"
 
 /*
 	Crafting methods.
@@ -30,7 +45,7 @@ enum CraftMethod
 /*
 	The type a hash can be. The earlier a type is mentioned in this enum,
 	the earlier it is tried at crafting, and the less likely is a collision.
-	Changing order causes changes in behavior, so know what you do.
+	Changing order causes changes in behaviour, so know what you do.
  */
 enum CraftHashType
 {
@@ -61,7 +76,9 @@ struct CraftInput
 	CraftInput() = default;
 
 	CraftInput(CraftMethod method_, unsigned int width_,
-			const std::vector<ItemStack> &items_);
+			const std::vector<ItemStack> &items_):
+		method(method_), width(width_), items(items_)
+	{}
 
 	// Returns true if all items are empty.
 	bool empty() const;
@@ -249,7 +266,7 @@ private:
 	std::string output;
 	// Recipe list (itemstrings)
 	std::vector<std::string> recipe;
-	// Recipe list (item names), sorted
+	// Recipe list (item names)
 	std::vector<std::string> recipe_names;
 	// bool indicating if initHash has been called already
 	bool hash_inited = false;

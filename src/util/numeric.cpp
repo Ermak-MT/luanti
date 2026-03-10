@@ -1,25 +1,42 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #include "numeric.h"
 
+#include "log.h"
 #include "constants.h" // BS, MAP_BLOCKSIZE
-#include "noise.h" // PcgRandom
+#include "noise.h" // PseudoRandom, PcgRandom
+#include "threading/mutex_auto_lock.h"
 #include <cstring>
 #include <cmath>
 
 
 // myrand
 
-static PcgRandom g_pcgrand;
+PcgRandom g_pcgrand;
 
 u32 myrand()
 {
 	return g_pcgrand.next();
 }
 
-void mysrand(u64 seed)
+void mysrand(unsigned int seed)
 {
 	g_pcgrand.seed(seed);
 }
@@ -29,24 +46,16 @@ void myrand_bytes(void *out, size_t len)
 	g_pcgrand.bytes(out, len);
 }
 
-float myrand_float()
-{
-	u32 uv = g_pcgrand.next();
-	return (float)uv / (float)U32_MAX;
-}
-
 int myrand_range(int min, int max)
 {
 	return g_pcgrand.range(min, max);
 }
 
-float myrand_range(float min, float max)
-{
-	return (max-min) * myrand_float() + min;
-}
 
-
-u64 murmur_hash_64_ua(const void *key, size_t len, unsigned int seed)
+/*
+	64-bit unaligned version of MurmurHash
+*/
+u64 murmur_hash_64_ua(const void *key, int len, unsigned int seed)
 {
 	const u64 m = 0xc6a4a7935bd1e995ULL;
 	const int r = 47;
@@ -68,14 +77,15 @@ u64 murmur_hash_64_ua(const void *key, size_t len, unsigned int seed)
 		h *= m;
 	}
 
+	const unsigned char *data2 = (const unsigned char *)data;
 	switch (len & 7) {
-		case 7: h ^= (u64)data[6] << 48; [[fallthrough]];
-		case 6: h ^= (u64)data[5] << 40; [[fallthrough]];
-		case 5: h ^= (u64)data[4] << 32; [[fallthrough]];
-		case 4: h ^= (u64)data[3] << 24; [[fallthrough]];
-		case 3: h ^= (u64)data[2] << 16; [[fallthrough]];
-		case 2: h ^= (u64)data[1] << 8;  [[fallthrough]];
-		case 1: h ^= (u64)data[0];
+		case 7: h ^= (u64)data2[6] << 48;
+		case 6: h ^= (u64)data2[5] << 40;
+		case 5: h ^= (u64)data2[4] << 32;
+		case 4: h ^= (u64)data2[3] << 24;
+		case 3: h ^= (u64)data2[2] << 16;
+		case 2: h ^= (u64)data2[1] << 8;
+		case 1: h ^= (u64)data2[0];
 				h *= m;
 	}
 
@@ -86,20 +96,34 @@ u64 murmur_hash_64_ua(const void *key, size_t len, unsigned int seed)
 	return h;
 }
 
-
+/*
+	blockpos_b: position of block in block coordinates
+	camera_pos: position of camera in nodes
+	camera_dir: an unit vector pointing to camera direction
+	range: viewing range
+	distance_ptr: return location for distance from the camera
+*/
 bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 		f32 camera_fov, f32 range, f32 *distance_ptr)
 {
+	// Maximum radius of a block.  The magic number is
+	// sqrt(3.0) / 2.0 in literal form.
+	static constexpr const f32 block_max_radius = 0.866025403784f * MAP_BLOCKSIZE * BS;
+
 	v3s16 blockpos_nodes = blockpos_b * MAP_BLOCKSIZE;
 
 	// Block center position
-	v3f blockpos = v3f::from(blockpos_nodes + MAP_BLOCKSIZE / 2) * BS;
+	v3f blockpos(
+			((float)blockpos_nodes.X + MAP_BLOCKSIZE/2) * BS,
+			((float)blockpos_nodes.Y + MAP_BLOCKSIZE/2) * BS,
+			((float)blockpos_nodes.Z + MAP_BLOCKSIZE/2) * BS
+	);
 
 	// Block position relative to camera
 	v3f blockpos_relative = blockpos - camera_pos;
 
 	// Total distance
-	f32 d = std::max(0.0f, blockpos_relative.getLength() - BLOCK_MAX_RADIUS);
+	f32 d = MYMAX(0, blockpos_relative.getLength() - block_max_radius);
 
 	if (distance_ptr)
 		*distance_ptr = d;
@@ -116,8 +140,8 @@ bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 	// Adjust camera position, for purposes of computing the angle,
 	// such that a block that has any portion visible with the
 	// current camera position will have the center visible at the
-	// adjusted position
-	f32 adjdist = BLOCK_MAX_RADIUS / cos((M_PI - camera_fov) / 2);
+	// adjusted postion
+	f32 adjdist = block_max_radius / cos((M_PI - camera_fov) / 2);
 
 	// Block position relative to adjusted camera
 	v3f blockpos_adj = blockpos - (camera_pos - camera_dir * adjdist);
@@ -130,7 +154,7 @@ bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 	f32 cosangle = dforward / blockpos_adj.getLength();
 
 	// If block is not in the field of view, skip it
-	// HOTFIX: use sligthly increased angle (+10%) to fix too aggressive
+	// HOTFIX: use sligthly increased angle (+10%) to fix too agressive
 	// culling. Somebody have to find out whats wrong with the math here.
 	// Previous value: camera_fov / 2
 	if (cosangle < std::cos(camera_fov * 0.55f))
@@ -139,8 +163,7 @@ bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 	return true;
 }
 
-
-inline float adjustDist(float dist, float zoom_fov)
+s16 adjustDist(s16 dist, float zoom_fov)
 {
 	// 1.775 ~= 72 * PI / 180 * 1.4, the default FOV on the client.
 	// The heuristic threshold for zooming is half of that.
@@ -148,16 +171,11 @@ inline float adjustDist(float dist, float zoom_fov)
 	if (zoom_fov < 0.001f || zoom_fov > threshold_fov)
 		return dist;
 
-	return dist * std::cbrt((1.0f - std::cos(threshold_fov)) /
-		(1.0f - std::cos(zoom_fov / 2.0f)));
+	return std::round(dist * std::cbrt((1.0f - std::cos(threshold_fov)) /
+		(1.0f - std::cos(zoom_fov / 2.0f))));
 }
 
-s16 adjustDist(s16 dist, float zoom_fov)
-{
-	return std::round(adjustDist((float)dist, zoom_fov));
-}
-
-void setPitchYawRollRad(core::matrix4 &m, v3f rot)
+void setPitchYawRollRad(core::matrix4 &m, const v3f &rot)
 {
 	f64 a1 = rot.Z, a2 = rot.X, a3 = rot.Y;
 	f64 c1 = cos(a1), s1 = sin(a1);

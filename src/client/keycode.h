@@ -1,98 +1,67 @@
-// Luanti
-// SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+/*
+Minetest
+Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 
 #pragma once
 
 #include "irrlichttypes.h"
-#include <Keycodes.h>
+#include "Keycodes.h"
 #include <IEventReceiver.h>
 #include <string>
-#include <variant>
 
-/* A key press, consisting of a scancode or a keycode.
- * This fits into 64 bits, so prefer passing this by value.
-*/
+/* A key press, consisting of either an Irrlicht keycode
+   or an actual char */
+
 class KeyPress
 {
 public:
 	KeyPress() = default;
 
-	KeyPress(const std::string &name);
+	KeyPress(const char *name);
 
-	KeyPress(const SEvent::SKeyInput &in);
+	KeyPress(const irr::SEvent::SKeyInput &in, bool prefer_character = false);
 
-	// Get a string representation that is suitable for use in minetest.conf
-	std::string sym() const;
-
-	// Get a human-readable string representation
-	std::string name() const;
-
-	// Get the corresponding keycode or KEY_UNKNOWN if one is not available
-	EKEY_CODE getKeycode() const;
-
-	// Get the corresponding keychar or '\0' if one is not available
-	wchar_t getKeychar() const;
-
-	// Get the scancode or 0 is one is not available
-	u32 getScancode() const
+	bool operator==(const KeyPress &o) const
 	{
-		if (auto pv = std::get_if<u32>(&scancode))
-			return *pv;
-		return 0;
+		return (Char > 0 && Char == o.Char) || (valid_kcode(Key) && Key == o.Key);
 	}
 
-	bool operator==(KeyPress o) const {
-		return scancode == o.scancode;
-	}
-	bool operator!=(KeyPress o) const {
-		return !(*this == o);
-	}
+	const char *sym() const;
+	const char *name() const;
 
-	// Used for e.g. std::set
-	bool operator<(KeyPress o) const {
-		return scancode < o.scancode;
-	}
-
-	// Check whether the keypress is valid
-	operator bool() const
+protected:
+	static bool valid_kcode(irr::EKEY_CODE k)
 	{
-		return std::holds_alternative<EKEY_CODE>(scancode) ?
-			Keycode::isValid(std::get<EKEY_CODE>(scancode)) :
-			std::get<u32>(scancode) != 0;
+		return k > 0 && k < irr::KEY_KEY_CODES_COUNT;
 	}
 
-	static KeyPress getSpecialKey(const std::string &name);
-
-private:
-	using value_type = std::variant<u32, EKEY_CODE>;
-	bool loadFromScancode(const std::string &name);
-	void loadFromKey(EKEY_CODE keycode, wchar_t keychar);
-	std::string formatScancode() const;
-
-	value_type scancode = KEY_UNKNOWN;
-
-	friend std::hash<KeyPress>;
+	irr::EKEY_CODE Key = irr::KEY_KEY_CODES_COUNT;
+	wchar_t Char = L'\0';
+	std::string m_name = "";
 };
 
-template <>
-struct std::hash<KeyPress>
-{
-	size_t operator()(KeyPress kp) const noexcept {
-		return std::hash<KeyPress::value_type>{}(kp.scancode);
-	}
-};
-
-// Global defines for convenience
-// This implementation defers creation of the objects to make sure that the
-// IrrlichtDevice is initialized.
-#define EscapeKey KeyPress::getSpecialKey("KEY_ESCAPE")
-#define LMBKey KeyPress::getSpecialKey("KEY_LBUTTON")
-#define MMBKey KeyPress::getSpecialKey("KEY_MBUTTON") // Middle Mouse Button
-#define RMBKey KeyPress::getSpecialKey("KEY_RBUTTON")
+extern const KeyPress EscapeKey;
+extern const KeyPress CancelKey;
 
 // Key configuration getter
-KeyPress getKeySetting(const std::string &settingname);
+KeyPress getKeySetting(const char *settingname);
 
 // Clear fast lookup cache
 void clearKeyCache();
+
+irr::EKEY_CODE keyname_to_keycode(const char *name);
