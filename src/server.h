@@ -40,6 +40,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <list>
 #include <map>
 #include <vector>
+#include <queue>          // MOD TRANSFER: Для очереди
+#include <unordered_set>  // MOD TRANSFER: Для множества клиентов
+#include <mutex>          // MOD TRANSFER: Для мьютекса
 
 class ChatEvent;
 struct ChatEventChat;
@@ -114,6 +117,57 @@ struct ServerPlayingSound
 	std::unordered_set<session_t> clients; // peer ids
 };
 
+// MOD TRANSFER START
+// Структуры для поддержки передачи модов
+
+// Константы для новых сетевых команд (должны быть добавлены в networkprotocol.h)
+#define TOCLIENT_MOD_ANNOUNCE 0x51
+#define TOCLIENT_MOD_DATA 0x52
+#define TOSERVER_MOD_REQUEST 0x53
+#define MAX_MOD_CHUNK_SIZE 32768 // 32KB на чанк
+
+// Структура для кэширования мода в памяти
+struct ModCacheEntry {
+	std::string mod_name;
+	std::string mod_path;
+	std::string sha1;
+	size_t size;
+	char* data; // Сжатые данные мода (ZIP архив)
+	
+	ModCacheEntry() : size(0), data(nullptr) {}
+	~ModCacheEntry() { delete[] data; }
+	
+	// Запрещаем копирование, разрешаем перемещение
+	DISABLE_CLASS_COPY(ModCacheEntry);
+	ModCacheEntry(ModCacheEntry&& other) noexcept 
+		: mod_name(std::move(other.mod_name)),
+		  mod_path(std::move(other.mod_path)),
+		  sha1(std::move(other.sha1)),
+		  size(other.size),
+		  data(other.data) {
+		other.size = 0;
+		other.data = nullptr;
+	}
+};
+
+// Манифест мода для отправки клиенту
+struct ModManifest {
+	std::string name;
+	size_t size;
+	std::string sha1;
+	std::vector<std::string> depends;
+	std::vector<std::string> optdepends;
+};
+
+// Запрос на передачу мода от конкретного клиента
+struct ModTransferRequest {
+	session_t peer_id;
+	std::string mod_name;
+	u32 current_chunk;
+	u32 total_chunks;
+};
+// MOD TRANSFER END
+
 class Server : public con::PeerHandler, public MapEventReceiver,
 		public InventoryManager, public IGameDef
 {
@@ -175,6 +229,8 @@ public:
 	void handleCommand_FirstSrp(NetworkPacket* pkt);
 	void handleCommand_SrpBytesA(NetworkPacket* pkt);
 	void handleCommand_SrpBytesM(NetworkPacket* pkt);
+	// MOD TRANSFER: Новый обработчик для запроса мода
+	void handleCommand_ModRequest(NetworkPacket* pkt);
 
 	void ProcessData(NetworkPacket *pkt);
 
@@ -521,6 +577,23 @@ private:
 	PlayerSAO *emergePlayer(const char *name, session_t peer_id, u16 proto_version);
 
 	void handlePeerChanges();
+
+	// MOD TRANSFER START
+	// Функции для поддержки передачи модов
+	void initModCache();                            // Инициализация кэша модов
+	void prepareModPackages();                       // Подготовка ZIP архивов модов
+	bool createModArchive(const std::string &source_dir, const std::string &dest_file); // Создание архива
+	void processModTransferQueue();                   // Обработка очереди передачи в AsyncRunStep
+	void sendModChunk(session_t peer_id, const std::string &mod_name, u32 chunk_index, u32 total_chunks); // Отправка чанка
+	void sendModAnnouncement(session_t peer_id);      // Отправка списка доступных модов клиенту
+
+	// Переменные для передачи модов
+	bool enable_mod_transfer = false;                 // Включается настройкой (например, из minetest.conf)
+	std::unordered_map<std::string, ModCacheEntry> m_mod_cache; // Кэш модов (имя -> данные)
+	std::unordered_map<std::string, ModManifest> m_mod_manifests; // Манифесты для отправки
+	std::list<ModTransferRequest> m_mod_transfer_queue; // Очередь активных передач
+	std::mutex m_mod_transfer_mutex;                   // Мьютекс для очереди
+	// MOD TRANSFER END
 
 	/*
 		Variables
